@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "organoid-calcium-imaging-workflow"
+version = "0.1.0"
+description = "Reproducible organoid calcium imaging from Imaris movies to ROI outputs."
+requires-python = ">=3.10"
+
+[project.scripts]
+organoid-calcium-workflow = "organoid_calcium_imaging_workflow.cli:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

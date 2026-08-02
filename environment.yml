@@ -1,0 +1,23 @@
+name: organoid-calcium-workflow
+
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.10
+  - napari=0.4.*
+  - pyqt=5.15.*
+  - qt-main
+  - caiman
+  - numpy
+  - scipy
+  - pandas
+  - tifffile
+  - imageio
+  - imageio-ffmpeg
+  - h5py
+  - scikit-image
+  - matplotlib
+  - statsmodels
+  - pillow
+  - pytest
