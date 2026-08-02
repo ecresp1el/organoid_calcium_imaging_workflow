@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import tifffile
 
-from organoid_calcium_imaging_workflow.preprocessing import PreprocessConfig, output_paths, read_imaris_movie, save_projections
+from organoid_calcium_imaging_workflow.preprocessing import PreprocessConfig, as_uint16, output_paths, read_imaris_movie, save_projections
 
 
 def make_ims(path: Path) -> None:
@@ -35,5 +35,12 @@ def test_output_layout_and_projection_values(tmp_path: Path) -> None:
     assert paths.raw_tiff == tmp_path / "outputs" / "source" / "raw" / "movie_raw.tif"
     movie = np.array([[[1, 3], [5, 7]], [[2, 4], [6, 8]]], dtype=np.float32)
     save_projections(movie, paths)
-    np.testing.assert_array_equal(tifffile.imread(paths.max_projection), np.array([[2, 4], [6, 8]], dtype=np.float32))
-    np.testing.assert_array_equal(tifffile.imread(paths.average_projection), np.array([[1.5, 3.5], [5.5, 7.5]], dtype=np.float32))
+    assert tifffile.imread(paths.max_projection).dtype == np.uint16
+    assert tifffile.imread(paths.average_projection).dtype == np.uint16
+    assert tifffile.imread(paths.std_projection).dtype == np.uint16
+    np.testing.assert_array_equal(tifffile.imread(paths.max_projection), np.array([[2, 4], [6, 8]], dtype=np.uint16))
+    np.testing.assert_array_equal(tifffile.imread(paths.average_projection), np.array([[2, 4], [6, 8]], dtype=np.uint16))
+
+
+def test_uint16_conversion_rounds_and_clips() -> None:
+    np.testing.assert_array_equal(as_uint16(np.array([-2.0, 1.4, 1.5, 70000.0, np.nan])), np.array([0, 1, 2, 65535, 0], dtype=np.uint16))
