@@ -35,7 +35,7 @@ copy containing only `.ims` files and nearby `*_metadata.txt` files, then
 write all generated work to a separate disposable scratch root.
 
 ```text
-Exp1_Ca_Imaging_source_only/     # fresh input: 28 .ims + 28 metadata files
+Exp1_Ca_Imaging_source_only_20260805/  # fresh input snapshot: 59 .ims + 59 metadata files
 Exp1_Ca_Imaging_scratch_*/       # disposable output only
 ```
 
