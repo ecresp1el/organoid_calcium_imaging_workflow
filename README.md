@@ -1,5 +1,8 @@
 # Organoid calcium imaging workflow
 
+For the shortest command-by-command guide, see
+[README_WALKTHROUGH.md](README_WALKTHROUGH.md).
+
 The streamlined organoid calcium-imaging workflow supports four stages:
 Imaris preprocessing, manual Napari ROI labels, adaptive dF/F analysis, and
 ROI/trace MP4 generation.

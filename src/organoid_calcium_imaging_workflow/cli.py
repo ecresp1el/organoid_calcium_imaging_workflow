@@ -6,7 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
-from .roi import annotate_in_napari, validate_roi_labels
+from .roi import add_manual_masks, annotate_in_napari, validate_roi_labels
 from .preprocessing import PreprocessConfig, preprocess_one
 from .analysis import run_analysis
 
@@ -20,6 +20,10 @@ def main() -> None:
     annotate = commands.add_parser("annotate", help="Open a processed recording in Napari and save manual ROI labels.")
     annotate.add_argument("--manifest", type=Path, required=True)
     annotate.add_argument("--roi", type=Path, default=None)
+    manual_mask = commands.add_parser("add-manual-masks", help="Import a compatible external 2D ROI-label TIFF.")
+    manual_mask.add_argument("--manifest", type=Path, required=True)
+    manual_mask.add_argument("--mask", type=Path, required=True)
+    manual_mask.add_argument("--replace-active", action="store_true", help="Replace an existing active roi_labels.tif after validation.")
     analyze = commands.add_parser("analyze", help="Extract ROI traces and run adaptive dF/F analysis.")
     analyze.add_argument("--manifest", type=Path, required=True)
     analyze.add_argument("--roi", type=Path, required=True)
@@ -37,6 +41,9 @@ def main() -> None:
         paths = payload["paths"]
         roi_path = args.roi or (args.manifest.parent / "rois" / "roi_labels.tif")
         annotate_in_napari(Path(paths["motion_corrected_tiff"]), Path(paths["max_projection"]), roi_path)
+    if args.command == "add-manual-masks":
+        record = add_manual_masks(args.manifest, args.mask, replace_active=args.replace_active)
+        print(f"Manual mask imported: {record['active_roi_labels']}; roi_count={record['roi_count']}")
     if args.command == "analyze":
         print(f"[analysis] fps={args.fps:g}; adaptive percentile F0 over 30 s; smoothing=1 s; peak threshold=mean+1 SD")
         print(f"[analysis] complete: {run_analysis(args.manifest, args.roi, args.fps)}")
