@@ -30,6 +30,16 @@ PYTHONUNBUFFERED=1 PYTHONPATH=src python -m organoid_calcium_imaging_workflow.cl
 For each `.ims`, wait for `COMPLETE`. Its scratch folder contains
 `processing_manifest.json` and will be marked `ready_for_roi`.
 
+To keep a permanent record, run a timestamped script from `run_commands/`
+instead of pasting the command. The supplied current run is launched with:
+
+```bash
+./run_commands/preprocess_20260805-152249.sh
+```
+
+It writes the exact paths, command, timestamps, and terminal output to
+`$SCRATCH/preprocess_20260805-152249.log`.
+
 ## 3A. Draw new ROIs in Napari
 
 ```bash
