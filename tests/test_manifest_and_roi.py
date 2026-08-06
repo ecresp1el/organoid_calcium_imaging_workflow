@@ -90,11 +90,11 @@ def test_roi_queue_requires_stage_one_and_reports_pending_or_complete(tmp_path: 
         tifffile.imwrite(path, values)
     manifest = paths.manifest
     manifest.write_text('{"source_ims": "' + str(ims) + '", "status": "ready_for_roi", "paths": {"raw_tiff": "' + str(raw) + '", "motion_corrected_tiff": "' + str(movie) + '", "max_projection": "' + str(projection) + '", "average_projection": "' + str(average) + '", "std_projection": "' + str(std) + '"}}')
-    assert roi_queue(source, scratch)[0].state == "pending"
+    assert roi_queue(source, scratch)[0].state == "not_started"
 
     labels = recording / "rois" / "roi_labels.tif"
     labels.parent.mkdir()
     tifffile.imwrite(labels, np.array([[0, 1, 1, 0, 0], [0, 0, 0, 2, 2], [0, 0, 0, 0, 0], [0, 0, 0, 0, 0]], dtype=np.uint16))
     item = roi_queue(source, scratch)[0]
-    assert item.state == "complete"
+    assert item.state == "started"
     assert item.roi_count == 2

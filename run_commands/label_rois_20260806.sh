@@ -7,6 +7,8 @@
 #   ./run_commands/label_rois_20260806.sh            # open next unfinished recording
 #   ./run_commands/label_rois_20260806.sh --list     # show numbered pending queue
 #   ./run_commands/label_rois_20260806.sh --number 12  # open pending item 12
+#   ./run_commands/label_rois_20260806.sh --started  # show recordings with saved ROIs
+#   ./run_commands/label_rois_20260806.sh --reopen 1 # reopen started item 1
 
 set -euo pipefail
 
@@ -33,12 +35,22 @@ case "${1:---next}" in
     fi
     QUEUE_ARGS=(--number "$2")
     ;;
+  --started)
+    QUEUE_ARGS=(--list-started)
+    ;;
+  --reopen)
+    if [[ $# -ne 2 || ! "$2" =~ ^[1-9][0-9]*$ ]]; then
+      echo "Usage: $0 --reopen <positive-started-recording-number>"
+      exit 2
+    fi
+    QUEUE_ARGS=(--reopen "$2")
+    ;;
   --help|-h)
     sed -n '1,9p' "$0"
     exit 0
     ;;
   *)
-    echo "Usage: $0 [--list | --number <positive-number>]"
+    echo "Usage: $0 [--list | --number <positive-number> | --started | --reopen <positive-number>]"
     exit 2
     ;;
 esac

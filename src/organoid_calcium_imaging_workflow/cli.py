@@ -26,6 +26,8 @@ def main() -> None:
     queue_selection = queue.add_mutually_exclusive_group()
     queue_selection.add_argument("--next", action="store_true", help="Open the first pending recording in Napari.")
     queue_selection.add_argument("--number", type=int, help="Open this displayed pending-recording number in Napari.")
+    queue_selection.add_argument("--list-started", action="store_true", help="Show recordings with one or more saved ROIs.")
+    queue_selection.add_argument("--reopen", type=int, help="Open this displayed started-recording number in Napari.")
     manual_mask = commands.add_parser("add-manual-masks", help="Import a compatible external 2D ROI-label TIFF.")
     manual_mask.add_argument("--manifest", type=Path, required=True)
     manual_mask.add_argument("--mask", type=Path, required=True)
@@ -54,24 +56,35 @@ def main() -> None:
             print("No nonzero ROI labels were drawn; recording remains pending in roi-queue.")
     if args.command == "roi-queue":
         items = roi_queue(args.input_root, args.scratch_root)
-        pending = [item for item in items if item.state == "pending"]
-        complete = [item for item in items if item.state == "complete"]
+        pending = [item for item in items if item.state == "not_started"]
+        started = [item for item in items if item.state == "started"]
         print(f"[roi-queue] Stage 1 verified: {len(items)} recording(s)")
-        print(f"[roi-queue] ROI status: pending={len(pending)} complete={len(complete)}")
-        if pending and not (args.next or args.number is not None):
-            print("[roi-queue] pending recordings:")
+        print(f"[roi-queue] ROI status: not_started={len(pending)} started={len(started)}")
+        if pending and not (args.next or args.number is not None or args.reopen is not None or args.list_started):
+            print("[roi-queue] not-started recordings:")
             for number, item in enumerate(pending, start=1):
                 print(f"  {number:>3}. {item.relative_path}")
-        elif not pending:
-            print("[roi-queue] No pending recordings.")
+        elif args.list_started:
+            if started:
+                print("[roi-queue] started recordings:")
+                for number, item in enumerate(started, start=1):
+                    print(f"  {number:>3}. {item.relative_path} (roi_count={item.roi_count})")
+            else:
+                print("[roi-queue] No started recordings.")
+        elif not pending and not args.reopen:
+            print("[roi-queue] No not-started recordings.")
 
         selected = None
         if args.next and pending:
             selected = pending[0]
         elif args.number is not None:
             if args.number < 1 or args.number > len(pending):
-                raise SystemExit(f"Pending recording number must be between 1 and {len(pending)}.")
+                raise SystemExit(f"Not-started recording number must be between 1 and {len(pending)}.")
             selected = pending[args.number - 1]
+        elif args.reopen is not None:
+            if args.reopen < 1 or args.reopen > len(started):
+                raise SystemExit(f"Started recording number must be between 1 and {len(started)}.")
+            selected = started[args.reopen - 1]
         if selected is not None:
             payload = json.loads(selected.manifest_path.read_text())
             roi_path = selected.manifest_path.parent / "rois" / "roi_labels.tif"

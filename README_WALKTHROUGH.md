@@ -98,9 +98,10 @@ PYTHONPATH=src python -m organoid_calcium_imaging_workflow.cli roi-queue \
   --number 12
 ```
 
-The queue recognizes a recording as complete only when a valid, nonempty ROI
-label TIFF is present. You can still use the direct command below to reopen an
-existing recording and edit its labels.
+The queue marks a recording as **started** when a valid, nonempty ROI label
+TIFF is present. It does not assume that one ROI means you are done annotating.
+Use the direct command below to reopen an existing recording and edit its
+labels.
 
 ### Daily ROI-labeling workflow for the current Gaillard dataset
 
@@ -115,14 +116,16 @@ conda activate organoid-calcium-workflow
 It verifies that Stage 1 is complete for all 59 source recordings, then opens
 the next unfinished recording in Napari. Draw ROIs with unique nonzero label
 numbers and **close Napari**. Closing saves the ROI file, validates it, and
-marks that recording ready for analysis. Run the same command again to advance
-to the next recording.
+marks that recording as started and ready for analysis. Run the same command
+again to advance to the next never-started recording.
 
 Useful alternatives:
 
 ```bash
 ./run_commands/label_rois_20260806.sh --list       # see the pending queue
 ./run_commands/label_rois_20260806.sh --number 12  # open a specific pending item
+./run_commands/label_rois_20260806.sh --started    # list started recordings
+./run_commands/label_rois_20260806.sh --reopen 1   # continue adding ROIs to started item 1
 ```
 
 If you close Napari with no nonzero ROIs, that recording remains pending. The
@@ -184,10 +187,16 @@ future stage and is not yet available.
 
 ## Continue after Stage 2
 
-1. Work through the Stage 2 queue until `--list` reports `pending=0`.
-2. For each recording you want to analyze, use the Stage 3 command above with
+1. Phase 1 is complete only after `preprocess-root` has verified every source
+   `.ims` recording. The Stage 2 launcher enforces this gate.
+2. In Phase 2, use `--next` for never-started recordings and `--reopen` to
+   continue a partially annotated one. Decide yourself when its ROIs are
+   scientifically complete; the workflow does not infer that from ROI count.
+3. Work through the Stage 2 queue until `--list` reports `not_started=0`, then
+   review `--started` before moving that cohort to analysis.
+4. For each recording you want to analyze, use the Stage 3 command above with
    that recording's manifest, ROI TIFF, and its true acquisition frame rate.
-3. Review the files in its `analysis/` folder, especially `roi_dff_qc.png`,
+5. Review the files in its `analysis/` folder, especially `roi_dff_qc.png`,
    before treating any extracted traces or peaks as final.
-4. ROI-outline plus time-locked trace MP4 generation is not yet migrated into
+6. ROI-outline plus time-locked trace MP4 generation is not yet migrated into
    this streamlined repository; do not expect a Stage 4 MP4 command yet.

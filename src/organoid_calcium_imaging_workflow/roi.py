@@ -68,7 +68,7 @@ def roi_queue(input_root: Path, scratch_root: Path) -> list[RoiQueueItem]:
     The source-only input tree is the authoritative list of expected `.ims`
     recordings. Each must have a verified preprocessing manifest and all five
     generated Stage 1 TIFFs in the scratch root. A valid, nonempty active ROI
-    TIFF is considered complete; invalid or empty ROI files remain pending.
+    TIFF is considered started; invalid or empty ROI files remain not started.
     """
     input_root = input_root.resolve()
     scratch_root = scratch_root.resolve()
@@ -95,15 +95,15 @@ def roi_queue(input_root: Path, scratch_root: Path) -> list[RoiQueueItem]:
             continue
 
         roi_path = manifest_path.parent / "rois" / "roi_labels.tif"
-        state, count = "pending", None
+        state, count = "not_started", None
         if roi_path.exists():
             try:
                 _, count = validate_roi_labels(Path(paths["motion_corrected_tiff"]), roi_path)
             except ValueError:
-                state, count = "pending", None
+                state, count = "not_started", None
             else:
                 if count and count > 0:
-                    state = "complete"
+                    state = "started"
         items.append(RoiQueueItem(manifest_path, manifest_path.parent.relative_to(scratch_root), state, count))
 
     if problems:
