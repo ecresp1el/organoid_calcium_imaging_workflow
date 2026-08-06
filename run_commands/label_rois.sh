@@ -16,7 +16,8 @@ usage() {
 
 SOURCE=""
 SCRATCH=""
-QUEUE_ARGS=(--next)
+MODE="next"
+MODE_VALUE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --source)
@@ -28,11 +29,11 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --list)
-      QUEUE_ARGS=()
+      MODE="list"
       shift
       ;;
     --started)
-      QUEUE_ARGS=(--list-started)
+      MODE="started"
       shift
       ;;
     --number|--reopen)
@@ -40,11 +41,12 @@ while [[ $# -gt 0 ]]; do
         echo "${1} requires a positive number." >&2
         exit 2
       fi
-      QUEUE_ARGS=("$1" "$2")
+      MODE="${1#--}"
+      MODE_VALUE="$2"
       shift 2
       ;;
     --next)
-      QUEUE_ARGS=(--next)
+      MODE="next"
       shift
       ;;
     --help|-h)
@@ -71,11 +73,23 @@ fi
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
-INPUT_ARGS=()
 if [[ -n "$SOURCE" ]]; then
-  INPUT_ARGS=(--input-root "$SOURCE")
+  BASE_ARGS=(--input-root "$SOURCE" --scratch-root "$SCRATCH")
+else
+  BASE_ARGS=(--scratch-root "$SCRATCH")
 fi
-PYTHONPATH=src python -m organoid_calcium_imaging_workflow.cli roi-queue \
-  "${INPUT_ARGS[@]}" \
-  --scratch-root "$SCRATCH" \
-  "${QUEUE_ARGS[@]}"
+
+case "$MODE" in
+  list)
+    PYTHONPATH=src python -m organoid_calcium_imaging_workflow.cli roi-queue "${BASE_ARGS[@]}"
+    ;;
+  started)
+    PYTHONPATH=src python -m organoid_calcium_imaging_workflow.cli roi-queue "${BASE_ARGS[@]}" --list-started
+    ;;
+  number|reopen)
+    PYTHONPATH=src python -m organoid_calcium_imaging_workflow.cli roi-queue "${BASE_ARGS[@]}" "--$MODE" "$MODE_VALUE"
+    ;;
+  next)
+    PYTHONPATH=src python -m organoid_calcium_imaging_workflow.cli roi-queue "${BASE_ARGS[@]}" --next
+    ;;
+esac
