@@ -90,6 +90,15 @@ manifest and all five Stage 1 TIFF outputs. See the Stage 2 section of
 [README_WALKTHROUGH.md](README_WALKTHROUGH.md) for the `--next` and `--number`
 commands.
 
+For the current full Gaillard dataset, the shortest entry point is:
+
+```bash
+conda activate organoid-calcium-workflow
+./run_commands/label_rois_20260806.sh
+```
+
+It opens the next pending recording and enforces the same full Stage 1 check.
+
 From the repository root, activate the workflow environment and set the
 recording directory created under your scratch root:
 

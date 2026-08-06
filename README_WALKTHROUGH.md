@@ -102,6 +102,32 @@ The queue recognizes a recording as complete only when a valid, nonempty ROI
 label TIFF is present. You can still use the direct command below to reopen an
 existing recording and edit its labels.
 
+### Daily ROI-labeling workflow for the current Gaillard dataset
+
+The supplied launcher already contains the current source and scratch paths.
+From the repository root, do this every time you want to label another movie:
+
+```bash
+conda activate organoid-calcium-workflow
+./run_commands/label_rois_20260806.sh
+```
+
+It verifies that Stage 1 is complete for all 59 source recordings, then opens
+the next unfinished recording in Napari. Draw ROIs with unique nonzero label
+numbers and **close Napari**. Closing saves the ROI file, validates it, and
+marks that recording ready for analysis. Run the same command again to advance
+to the next recording.
+
+Useful alternatives:
+
+```bash
+./run_commands/label_rois_20260806.sh --list       # see the pending queue
+./run_commands/label_rois_20260806.sh --number 12  # open a specific pending item
+```
+
+If you close Napari with no nonzero ROIs, that recording remains pending. The
+queue will never silently skip it.
+
 ```bash
 RECORDING=/path/to/disposable_scratch/<source-relative-parent>/<ims-stem>
 PYTHONPATH=src python -m organoid_calcium_imaging_workflow.cli annotate \
@@ -139,6 +165,8 @@ PYTHONPATH=src python -m organoid_calcium_imaging_workflow.cli validate-roi \
 ```
 
 Continue only when it reports `ROI validation passed` and a nonzero ROI count.
+The Stage 2 launcher validates automatically when you close Napari, so this
+direct validation command is mainly for checking an imported or edited mask.
 
 ## 5. Run adaptive-F0 analysis
 
@@ -153,3 +181,13 @@ PYTHONPATH=src python -m organoid_calcium_imaging_workflow.cli analyze \
 
 Results appear in `$RECORDING/analysis/`. MP4 generation is the remaining
 future stage and is not yet available.
+
+## Continue after Stage 2
+
+1. Work through the Stage 2 queue until `--list` reports `pending=0`.
+2. For each recording you want to analyze, use the Stage 3 command above with
+   that recording's manifest, ROI TIFF, and its true acquisition frame rate.
+3. Review the files in its `analysis/` folder, especially `roi_dff_qc.png`,
+   before treating any extracted traces or peaks as final.
+4. ROI-outline plus time-locked trace MP4 generation is not yet migrated into
+   this streamlined repository; do not expect a Stage 4 MP4 command yet.
