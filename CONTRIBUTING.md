@@ -7,19 +7,22 @@ external-drive paths.
 
 ## Start an independent calcium-imaging project
 
-### Option A: fork on GitHub
+### Option A: fork and clone from the command line
 
-On the repository's GitHub page, select **Fork**, then clone your fork:
+This creates a fork under the signed-in user's GitHub account, clones it, and
+adds the original workflow repository as a remote for future updates:
 
 ```bash
-git clone https://github.com/YOUR-ACCOUNT/YOUR-FORK.git my-calcium-project
-cd my-calcium-project
+gh auth login                         # needed once per computer
+gh repo fork ecresp1el/organoid_calcium_imaging_workflow --clone --remote
+cd organoid_calcium_imaging_workflow
 conda env create --file environment.yml
 conda activate organoid-calcium-workflow
 ```
 
-Your fork has its own GitHub history and can later receive workflow updates
-through a pull request or by adding this repository as an `upstream` remote.
+If GitHub CLI (`gh`) is not installed, install it first from
+<https://cli.github.com/>. Your fork has its own GitHub history and can later
+receive workflow updates through a pull request or from the original remote.
 
 ### Option B: create a separate repository from a local copy
 
