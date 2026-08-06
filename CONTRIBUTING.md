@@ -13,16 +13,18 @@ This creates a fork under the signed-in user's GitHub account, clones it, and
 adds the original workflow repository as a remote for future updates:
 
 ```bash
-gh auth login                         # needed once per computer
+brew install gh                        # install GitHub CLI on macOS, once
+gh auth login                          # sign in, once per computer
 gh repo fork ecresp1el/organoid_calcium_imaging_workflow --clone --remote
 cd organoid_calcium_imaging_workflow
 conda env create --file environment.yml
 conda activate organoid-calcium-workflow
 ```
 
-If GitHub CLI (`gh`) is not installed, install it first from
-<https://cli.github.com/>. Your fork has its own GitHub history and can later
-receive workflow updates through a pull request or from the original remote.
+If `brew` is also not found, install Homebrew first or download the macOS
+GitHub CLI installer from <https://cli.github.com/>, then start again at
+`gh auth login`. Your fork has its own GitHub history and can later receive
+workflow updates through a pull request or from the original remote.
 
 ### Option B: create a separate repository from a local copy
 
