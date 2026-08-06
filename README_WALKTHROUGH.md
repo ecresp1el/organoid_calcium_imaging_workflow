@@ -64,6 +64,44 @@ It writes the exact paths, command, timestamps, and terminal output to
 
 ## 3A. Draw new ROIs in Napari
 
+**Stage 1 must have completed first.** The ROI queue compares every `.ims`
+recording in your source-only input root against its scratch output. Each must
+have a verified Stage 1 `processing_manifest.json` plus all five generated
+TIFF outputs. It stops with a clear error if preprocessing is incomplete.
+
+List the remaining recordings that need ROIs:
+
+```bash
+SOURCE=/path/to/source_only_input
+SCRATCH=/path/to/disposable_scratch
+PYTHONPATH=src python -m organoid_calcium_imaging_workflow.cli roi-queue \
+  --input-root "$SOURCE" \
+  --scratch-root "$SCRATCH"
+```
+
+To open the first pending recording, use `--next`. After closing Napari, run
+the same command again; it advances to the next unfinished recording.
+
+```bash
+PYTHONPATH=src python -m organoid_calcium_imaging_workflow.cli roi-queue \
+  --input-root "$SOURCE" \
+  --scratch-root "$SCRATCH" \
+  --next
+```
+
+To open a particular entry from the displayed pending list, use its number:
+
+```bash
+PYTHONPATH=src python -m organoid_calcium_imaging_workflow.cli roi-queue \
+  --input-root "$SOURCE" \
+  --scratch-root "$SCRATCH" \
+  --number 12
+```
+
+The queue recognizes a recording as complete only when a valid, nonempty ROI
+label TIFF is present. You can still use the direct command below to reopen an
+existing recording and edit its labels.
+
 ```bash
 RECORDING=/path/to/disposable_scratch/<source-relative-parent>/<ims-stem>
 PYTHONPATH=src python -m organoid_calcium_imaging_workflow.cli annotate \

@@ -6,8 +6,11 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+from dataclasses import dataclass
 import numpy as np
 import tifffile
+
+from .preprocessing import check_preprocess_complete, output_paths
 
 
 def _tiff_shape_and_dtype(path: Path) -> tuple[tuple[int, ...], np.dtype]:
@@ -47,6 +50,82 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+@dataclass(frozen=True)
+class RoiQueueItem:
+    """One Stage-1-complete recording and its current manual-ROI state."""
+
+    manifest_path: Path
+    relative_path: Path
+    state: str
+    roi_count: int | None
+
+
+def roi_queue(input_root: Path, scratch_root: Path) -> list[RoiQueueItem]:
+    """List ROI work only when every source recording passed Stage 1.
+
+    The source-only input tree is the authoritative list of expected `.ims`
+    recordings. Each must have a verified preprocessing manifest and all five
+    generated Stage 1 TIFFs in the scratch root. A valid, nonempty active ROI
+    TIFF is considered complete; invalid or empty ROI files remain pending.
+    """
+    input_root = input_root.resolve()
+    scratch_root = scratch_root.resolve()
+    ims_paths = sorted(path for path in input_root.rglob("*.ims") if not path.name.startswith("._"))
+    if not ims_paths:
+        raise ValueError(
+            f"No source `.ims` recordings found under {input_root}. "
+            "Run preprocess-root successfully before beginning ROI annotation."
+        )
+    problems: list[str] = []
+    items: list[RoiQueueItem] = []
+    for ims_path in ims_paths:
+        check = check_preprocess_complete(ims_path, input_root, scratch_root)
+        relative_ims = ims_path.relative_to(input_root)
+        if not check.complete:
+            problems.append(f"{relative_ims} ({check.reason})")
+            continue
+        manifest_path = output_paths(ims_path, scratch_root / relative_ims.parent).manifest
+        try:
+            payload = json.loads(manifest_path.read_text())
+            paths = payload["paths"]
+        except (KeyError, TypeError, json.JSONDecodeError) as error:
+            problems.append(f"{manifest_path.relative_to(scratch_root)} ({type(error).__name__})")
+            continue
+
+        roi_path = manifest_path.parent / "rois" / "roi_labels.tif"
+        state, count = "pending", None
+        if roi_path.exists():
+            try:
+                _, count = validate_roi_labels(Path(paths["motion_corrected_tiff"]), roi_path)
+            except ValueError:
+                state, count = "pending", None
+            else:
+                if count and count > 0:
+                    state = "complete"
+        items.append(RoiQueueItem(manifest_path, manifest_path.parent.relative_to(scratch_root), state, count))
+
+    if problems:
+        preview = "; ".join(problems[:3])
+        suffix = "" if len(problems) <= 3 else f"; plus {len(problems) - 3} more"
+        raise ValueError(
+            "ROI queue stopped because Stage 1 is incomplete or invalid for "
+            f"{len(problems)} recording(s): {preview}{suffix}. "
+            "Finish or repair Stage 1 before ROI annotation."
+        )
+    return items
+
+
+def record_napari_roi_annotation(manifest_path: Path, roi_path: Path, roi_count: int | None) -> None:
+    """Record a nonempty Napari ROI result as ready for analysis."""
+    if not roi_count:
+        return
+    payload = json.loads(manifest_path.read_text())
+    payload["roi_labels"] = str(roi_path)
+    payload["analysis_stale_due_to_roi_update"] = True
+    payload["status"] = "ready_for_analysis"
+    manifest_path.write_text(json.dumps(payload, indent=2) + "\n")
 
 
 def add_manual_masks(manifest_path: Path, mask_path: Path, replace_active: bool = False) -> dict[str, object]:
@@ -106,7 +185,7 @@ def add_manual_masks(manifest_path: Path, mask_path: Path, replace_active: bool 
     return record
 
 
-def annotate_in_napari(movie_path: Path, projection_path: Path, roi_path: Path) -> None:
+def annotate_in_napari(movie_path: Path, projection_path: Path, roi_path: Path) -> int | None:
     """Open a movie and max projection for manual 2D ROI labels, then save on close."""
     import napari
 
@@ -125,3 +204,4 @@ def annotate_in_napari(movie_path: Path, projection_path: Path, roi_path: Path) 
     tifffile.imwrite(roi_path, saved)
     _, count = validate_roi_labels(movie_path, roi_path)
     print(f"ROI labels saved: {roi_path}; roi_count={count}")
+    return count

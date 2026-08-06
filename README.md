@@ -83,6 +83,13 @@ Complete Stage 1 preprocessing for one recording first. You need its
 `processing_manifest.json`; a successful one has status `ready_for_roi` and
 the sibling folders `motion_corrected/` and `projections/`.
 
+For a full scratch root, use `roi-queue` to list or open only recordings that
+need ROIs. It compares the source-only `.ims` tree against the scratch root
+and refuses to proceed unless every source recording has a verified Stage 1
+manifest and all five Stage 1 TIFF outputs. See the Stage 2 section of
+[README_WALKTHROUGH.md](README_WALKTHROUGH.md) for the `--next` and `--number`
+commands.
+
 From the repository root, activate the workflow environment and set the
 recording directory created under your scratch root:
 

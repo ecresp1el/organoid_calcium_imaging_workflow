@@ -6,7 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
-from .roi import add_manual_masks, annotate_in_napari, validate_roi_labels
+from .roi import add_manual_masks, annotate_in_napari, record_napari_roi_annotation, roi_queue, validate_roi_labels
 from .preprocessing import PreprocessConfig, check_preprocess_complete, preprocess_one
 from .analysis import run_analysis
 
@@ -20,6 +20,12 @@ def main() -> None:
     annotate = commands.add_parser("annotate", help="Open a processed recording in Napari and save manual ROI labels.")
     annotate.add_argument("--manifest", type=Path, required=True)
     annotate.add_argument("--roi", type=Path, default=None)
+    queue = commands.add_parser("roi-queue", help="List or open ROI work after Stage 1 preprocessing is complete.")
+    queue.add_argument("--input-root", type=Path, required=True, help="Source-only `.ims` tree used to verify Stage 1 completeness.")
+    queue.add_argument("--scratch-root", type=Path, required=True)
+    queue_selection = queue.add_mutually_exclusive_group()
+    queue_selection.add_argument("--next", action="store_true", help="Open the first pending recording in Napari.")
+    queue_selection.add_argument("--number", type=int, help="Open this displayed pending-recording number in Napari.")
     manual_mask = commands.add_parser("add-manual-masks", help="Import a compatible external 2D ROI-label TIFF.")
     manual_mask.add_argument("--manifest", type=Path, required=True)
     manual_mask.add_argument("--mask", type=Path, required=True)
@@ -42,7 +48,42 @@ def main() -> None:
         payload = json.loads(args.manifest.read_text())
         paths = payload["paths"]
         roi_path = args.roi or (args.manifest.parent / "rois" / "roi_labels.tif")
-        annotate_in_napari(Path(paths["motion_corrected_tiff"]), Path(paths["max_projection"]), roi_path)
+        count = annotate_in_napari(Path(paths["motion_corrected_tiff"]), Path(paths["max_projection"]), roi_path)
+        record_napari_roi_annotation(args.manifest, roi_path, count)
+        if not count:
+            print("No nonzero ROI labels were drawn; recording remains pending in roi-queue.")
+    if args.command == "roi-queue":
+        items = roi_queue(args.input_root, args.scratch_root)
+        pending = [item for item in items if item.state == "pending"]
+        complete = [item for item in items if item.state == "complete"]
+        print(f"[roi-queue] Stage 1 verified: {len(items)} recording(s)")
+        print(f"[roi-queue] ROI status: pending={len(pending)} complete={len(complete)}")
+        if pending and not (args.next or args.number is not None):
+            print("[roi-queue] pending recordings:")
+            for number, item in enumerate(pending, start=1):
+                print(f"  {number:>3}. {item.relative_path}")
+        elif not pending:
+            print("[roi-queue] No pending recordings.")
+
+        selected = None
+        if args.next and pending:
+            selected = pending[0]
+        elif args.number is not None:
+            if args.number < 1 or args.number > len(pending):
+                raise SystemExit(f"Pending recording number must be between 1 and {len(pending)}.")
+            selected = pending[args.number - 1]
+        if selected is not None:
+            payload = json.loads(selected.manifest_path.read_text())
+            roi_path = selected.manifest_path.parent / "rois" / "roi_labels.tif"
+            print(f"[roi-queue] opening: {selected.relative_path}")
+            count = annotate_in_napari(
+                Path(payload["paths"]["motion_corrected_tiff"]),
+                Path(payload["paths"]["max_projection"]),
+                roi_path,
+            )
+            record_napari_roi_annotation(selected.manifest_path, roi_path, count)
+            if not count:
+                print("[roi-queue] no nonzero ROI labels were drawn; recording remains pending.")
     if args.command == "add-manual-masks":
         record = add_manual_masks(args.manifest, args.mask, replace_active=args.replace_active)
         print(f"Manual mask imported: {record['active_roi_labels']}; roi_count={record['roi_count']}")
