@@ -2,6 +2,8 @@
 
 For the shortest command-by-command guide, see
 [README_WALKTHROUGH.md](README_WALKTHROUGH.md).
+For starting an independent project or contributing changes safely, see
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 The streamlined organoid calcium-imaging workflow supports four stages:
 Imaris preprocessing, manual Napari ROI labels, adaptive dF/F analysis, and
