@@ -16,6 +16,21 @@ If Stage 1 is already complete, you may instead share the entire scratch folder
 plus this repository. The coworker does not need the original `.ims` files to
 continue ROI work. After copying scratch to a new location, run once:
 
+Use `rsync`, not Finder drag-and-drop, for a large transfer. It shows ongoing
+file progress and can safely resume after disconnection or interruption:
+
+```bash
+./run_commands/copy_scratch.sh \
+  --source /path/on/source-drive/Exp1_Ca_Imaging_scratch_20260805 \
+  --destination-root /path/on/recipient-drive
+```
+
+The copied folder is created as
+`/path/on/recipient-drive/Exp1_Ca_Imaging_scratch_20260805`. Rerun the same
+command if needed; do not delete partial output.
+
+On the recipient's computer, adopt the copied scratch folder once:
+
 ```bash
 ./run_commands/adopt_scratch.sh --scratch /path/to/copied_scratch
 ./run_commands/label_rois.sh --scratch /path/to/copied_scratch
