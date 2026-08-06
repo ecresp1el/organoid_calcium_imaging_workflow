@@ -10,13 +10,15 @@ external-drive paths.
 ### Option A: fork and clone from the command line
 
 This creates a fork under the signed-in user's GitHub account, clones it, and
-adds the original workflow repository as a remote for future updates:
+then adds the original workflow repository as `upstream` for future updates:
 
 ```bash
 brew install gh                        # install GitHub CLI on macOS, once
 gh auth login                          # sign in, once per computer
-gh repo fork ecresp1el/organoid_calcium_imaging_workflow --clone --remote
+gh repo fork ecresp1el/organoid_calcium_imaging_workflow --clone
 cd organoid_calcium_imaging_workflow
+git remote add upstream https://github.com/ecresp1el/organoid_calcium_imaging_workflow.git
+git remote -v
 conda env create --file environment.yml
 conda activate organoid-calcium-workflow
 ```
