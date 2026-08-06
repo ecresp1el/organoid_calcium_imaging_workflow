@@ -62,7 +62,7 @@ class RoiQueueItem:
     roi_count: int | None
 
 
-def roi_queue(input_root: Path, scratch_root: Path) -> list[RoiQueueItem]:
+def roi_queue(input_root: Path | None, scratch_root: Path) -> list[RoiQueueItem]:
     """List ROI work only when every source recording passed Stage 1.
 
     The source-only input tree is the authoritative list of expected `.ims`
@@ -70,35 +70,53 @@ def roi_queue(input_root: Path, scratch_root: Path) -> list[RoiQueueItem]:
     generated Stage 1 TIFFs in the scratch root. A valid, nonempty active ROI
     TIFF is considered started; invalid or empty ROI files remain not started.
     """
-    input_root = input_root.resolve()
     scratch_root = scratch_root.resolve()
-    ims_paths = sorted(path for path in input_root.rglob("*.ims") if not path.name.startswith("._"))
-    if not ims_paths:
-        raise ValueError(
-            f"No source `.ims` recordings found under {input_root}. "
-            "Run preprocess-root successfully before beginning ROI annotation."
-        )
+    if input_root is None:
+        manifest_paths = sorted(scratch_root.rglob("processing_manifest.json"))
+        if not manifest_paths:
+            raise ValueError(f"No Stage 1 manifests found under {scratch_root}.")
+        sources = [(None, path) for path in manifest_paths]
+    else:
+        input_root = input_root.resolve()
+        ims_paths = sorted(path for path in input_root.rglob("*.ims") if not path.name.startswith("._"))
+        if not ims_paths:
+            raise ValueError(f"No source `.ims` recordings found under {input_root}. Run preprocess-root first.")
+        sources = []
+        for ims_path in ims_paths:
+            check = check_preprocess_complete(ims_path, input_root, scratch_root)
+            relative_ims = ims_path.relative_to(input_root)
+            sources.append((None if check.complete else f"{relative_ims} ({check.reason})", output_paths(ims_path, scratch_root / relative_ims.parent).manifest))
     problems: list[str] = []
     items: list[RoiQueueItem] = []
-    for ims_path in ims_paths:
-        check = check_preprocess_complete(ims_path, input_root, scratch_root)
-        relative_ims = ims_path.relative_to(input_root)
-        if not check.complete:
-            problems.append(f"{relative_ims} ({check.reason})")
+    for source_problem, manifest_path in sources:
+        if source_problem:
+            problems.append(source_problem)
             continue
-        manifest_path = output_paths(ims_path, scratch_root / relative_ims.parent).manifest
         try:
             payload = json.loads(manifest_path.read_text())
             paths = payload["paths"]
         except (KeyError, TypeError, json.JSONDecodeError) as error:
             problems.append(f"{manifest_path.relative_to(scratch_root)} ({type(error).__name__})")
             continue
+        local_required = [
+            manifest_path.parent / "raw" / "movie_raw.tif",
+            manifest_path.parent / "motion_corrected" / "movie_motion_corrected.tif",
+            manifest_path.parent / "projections" / "max_projection.tif",
+            manifest_path.parent / "projections" / "average_projection.tif",
+            manifest_path.parent / "projections" / "std_projection.tif",
+        ]
+        if any(not path.is_file() or path.stat().st_size == 0 for path in local_required):
+            problems.append(f"{manifest_path.relative_to(scratch_root)} (missing local Stage 1 TIFF output)")
+            continue
 
         roi_path = manifest_path.parent / "rois" / "roi_labels.tif"
         state, count = "not_started", None
         if roi_path.exists():
             try:
-                _, count = validate_roi_labels(Path(paths["motion_corrected_tiff"]), roi_path)
+                _, count = validate_roi_labels(
+                    manifest_path.parent / "motion_corrected" / "movie_motion_corrected.tif",
+                    roi_path,
+                )
             except ValueError:
                 state, count = "not_started", None
             else:
@@ -115,6 +133,25 @@ def roi_queue(input_root: Path, scratch_root: Path) -> list[RoiQueueItem]:
             "Finish or repair Stage 1 before ROI annotation."
         )
     return items
+
+
+def adopt_scratch_root(scratch_root: Path) -> int:
+    """Rewrite stale absolute paths after copying a Stage 1 scratch folder."""
+    items = roi_queue(None, scratch_root)
+    for item in items:
+        root = item.manifest_path.parent
+        payload = json.loads(item.manifest_path.read_text())
+        payload["paths"] = {
+            "raw_tiff": str(root / "raw" / "movie_raw.tif"),
+            "motion_corrected_tiff": str(root / "motion_corrected" / "movie_motion_corrected.tif"),
+            "max_projection": str(root / "projections" / "max_projection.tif"),
+            "average_projection": str(root / "projections" / "average_projection.tif"),
+            "std_projection": str(root / "projections" / "std_projection.tif"),
+        }
+        if (root / "rois" / "roi_labels.tif").is_file():
+            payload["roi_labels"] = str(root / "rois" / "roi_labels.tif")
+        item.manifest_path.write_text(json.dumps(payload, indent=2) + "\n")
+    return len(items)
 
 
 def record_napari_roi_annotation(manifest_path: Path, roi_path: Path, roi_count: int | None) -> None:

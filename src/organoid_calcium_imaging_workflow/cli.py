@@ -6,7 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
-from .roi import add_manual_masks, annotate_in_napari, record_napari_roi_annotation, roi_queue, validate_roi_labels
+from .roi import add_manual_masks, adopt_scratch_root, annotate_in_napari, record_napari_roi_annotation, roi_queue, validate_roi_labels
 from .preprocessing import PreprocessConfig, check_preprocess_complete, preprocess_one
 from .analysis import run_analysis
 
@@ -21,13 +21,15 @@ def main() -> None:
     annotate.add_argument("--manifest", type=Path, required=True)
     annotate.add_argument("--roi", type=Path, default=None)
     queue = commands.add_parser("roi-queue", help="List or open ROI work after Stage 1 preprocessing is complete.")
-    queue.add_argument("--input-root", type=Path, required=True, help="Source-only `.ims` tree used to verify Stage 1 completeness.")
+    queue.add_argument("--input-root", type=Path, default=None, help="Optional source-only `.ims` tree used to verify Stage 1 completeness.")
     queue.add_argument("--scratch-root", type=Path, required=True)
     queue_selection = queue.add_mutually_exclusive_group()
     queue_selection.add_argument("--next", action="store_true", help="Open the first pending recording in Napari.")
     queue_selection.add_argument("--number", type=int, help="Open this displayed pending-recording number in Napari.")
     queue_selection.add_argument("--list-started", action="store_true", help="Show recordings with one or more saved ROIs.")
     queue_selection.add_argument("--reopen", type=int, help="Open this displayed started-recording number in Napari.")
+    adopt = commands.add_parser("adopt-scratch", help="Make a copied scratch folder usable at its new location.")
+    adopt.add_argument("--scratch-root", type=Path, required=True)
     manual_mask = commands.add_parser("add-manual-masks", help="Import a compatible external 2D ROI-label TIFF.")
     manual_mask.add_argument("--manifest", type=Path, required=True)
     manual_mask.add_argument("--mask", type=Path, required=True)
@@ -90,13 +92,15 @@ def main() -> None:
             roi_path = selected.manifest_path.parent / "rois" / "roi_labels.tif"
             print(f"[roi-queue] opening: {selected.relative_path}")
             count = annotate_in_napari(
-                Path(payload["paths"]["motion_corrected_tiff"]),
-                Path(payload["paths"]["max_projection"]),
+                selected.manifest_path.parent / "motion_corrected" / "movie_motion_corrected.tif",
+                selected.manifest_path.parent / "projections" / "max_projection.tif",
                 roi_path,
             )
             record_napari_roi_annotation(selected.manifest_path, roi_path, count)
             if not count:
                 print("[roi-queue] no nonzero ROI labels were drawn; recording remains pending.")
+    if args.command == "adopt-scratch":
+        print(f"Scratch folder adopted: {args.scratch_root}; recordings={adopt_scratch_root(args.scratch_root)}")
     if args.command == "add-manual-masks":
         record = add_manual_masks(args.manifest, args.mask, replace_active=args.replace_active)
         print(f"Manual mask imported: {record['active_roi_labels']}; roi_count={record['roi_count']}")
