@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from .roi import add_manual_masks, annotate_in_napari, validate_roi_labels
-from .preprocessing import PreprocessConfig, preprocess_one
+from .preprocessing import PreprocessConfig, check_preprocess_complete, preprocess_one
 from .analysis import run_analysis
 
 
@@ -28,9 +28,11 @@ def main() -> None:
     analyze.add_argument("--manifest", type=Path, required=True)
     analyze.add_argument("--roi", type=Path, required=True)
     analyze.add_argument("--fps", type=float, required=True)
-    batch = commands.add_parser("preprocess-root", help="Preprocess every .ims file into a separate scratch root.")
+    batch = commands.add_parser("preprocess-root", help="Preprocess every .ims file; resumes only verified stage-4 recordings by default.")
     batch.add_argument("--input-root", type=Path, required=True)
     batch.add_argument("--output-root", type=Path, required=True)
+    batch.add_argument("--dry-run", action="store_true", help="Show verified skips and incomplete reruns, then exit without changing files.")
+    batch.add_argument("--overwrite", action="store_true", help="Explicitly recompute even verified stage-4 recordings.")
     args = parser.parse_args()
     if args.command == "validate-roi":
         shape, count = validate_roi_labels(args.movie, args.roi)
@@ -52,8 +54,28 @@ def main() -> None:
         if not ims_paths:
             raise SystemExit(f"No .ims files found under {args.input_root}")
         print(f"[batch] found {len(ims_paths)} recordings")
+        checks = {path: check_preprocess_complete(path, args.input_root, args.output_root) for path in ims_paths}
+        skip_paths = {path for path, check in checks.items() if check.complete and not args.overwrite}
+        queued_paths = [path for path in ims_paths if path not in skip_paths]
+        print(
+            f"[batch] plan: verified_complete={len(skip_paths)} skip; "
+            f"queued={len(queued_paths)}; overwrite={args.overwrite}; dry_run={args.dry_run}"
+        )
+        for number, path in enumerate(ims_paths, start=1):
+            if path in skip_paths:
+                print(f"[batch] SKIP {number}/{len(ims_paths)}: {path.relative_to(args.input_root)}")
+            elif args.dry_run:
+                print(
+                    f"[batch] QUEUE {number}/{len(ims_paths)}: {path.relative_to(args.input_root)} "
+                    f"({checks[path].reason})"
+                )
+        if args.dry_run:
+            print("[batch] dry run complete: no files were changed")
+            return
         failures = []
         for number, path in enumerate(ims_paths, start=1):
+            if path in skip_paths:
+                continue
             print(f"[batch] recording {number}/{len(ims_paths)}: {path.relative_to(args.input_root)}")
             try:
                 preprocess_one(path, args.input_root, args.output_root, PreprocessConfig())
@@ -62,7 +84,10 @@ def main() -> None:
                 print(f"  ERROR recording {number}/{len(ims_paths)}: {type(error).__name__}: {error}")
             else:
                 print(f"  COMPLETE recording {number}/{len(ims_paths)}")
-        print(f"[batch] complete: successes={len(ims_paths)-len(failures)} failures={len(failures)}")
+        print(
+            f"[batch] complete: processed_successes={len(queued_paths)-len(failures)} "
+            f"skipped={len(skip_paths)} failures={len(failures)}"
+        )
         for path, error in failures:
             print(f"[batch] failure: {path}: {error}")
 

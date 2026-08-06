@@ -30,6 +30,28 @@ PYTHONUNBUFFERED=1 PYTHONPATH=src python -m organoid_calcium_imaging_workflow.cl
 For each `.ims`, wait for `COMPLETE`. Its scratch folder contains
 `processing_manifest.json` and will be marked `ready_for_roi`.
 
+The command is resumable by default. Stage 4 writes the completion manifest,
+so rerunning skips only recordings with that verified manifest plus all
+expected uint16 TIFF outputs. If you stop during stages 1–3, only that one
+incomplete recording is rerun. Preview the plan without changing files:
+
+```bash
+PYTHONPATH=src python -m organoid_calcium_imaging_workflow.cli preprocess-root \
+  --input-root /path/to/source_only_input \
+  --output-root /path/to/disposable_scratch \
+  --dry-run
+```
+
+Use `--overwrite` only when you deliberately want to recompute even verified
+complete recordings.
+
+For the supplied timestamped script, the equivalent checks are simply:
+
+```bash
+./run_commands/preprocess_20260805-152249.sh --dry-run
+./run_commands/preprocess_20260805-152249.sh --overwrite  # deliberate full recomputation
+```
+
 To keep a permanent record, run a timestamped script from `run_commands/`
 instead of pasting the command. The supplied current run is launched with:
 

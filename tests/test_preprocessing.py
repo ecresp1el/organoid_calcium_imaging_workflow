@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import tifffile
 
-from organoid_calcium_imaging_workflow.preprocessing import PreprocessConfig, as_uint16, output_paths, read_imaris_movie, save_projections
+from organoid_calcium_imaging_workflow.preprocessing import PreprocessConfig, as_uint16, check_preprocess_complete, output_paths, read_imaris_movie, save_projections
 
 
 def make_ims(path: Path) -> None:
@@ -44,3 +44,29 @@ def test_output_layout_and_projection_values(tmp_path: Path) -> None:
 
 def test_uint16_conversion_rounds_and_clips() -> None:
     np.testing.assert_array_equal(as_uint16(np.array([-2.0, 1.4, 1.5, 70000.0, np.nan])), np.array([0, 1, 2, 65535, 0], dtype=np.uint16))
+
+
+def test_completion_check_requires_manifest_and_verified_uint16_outputs(tmp_path: Path) -> None:
+    input_root = tmp_path / "source"
+    ims = input_root / "group" / "recording.ims"
+    ims.parent.mkdir(parents=True)
+    ims.write_bytes(b"placeholder")
+    output_root = tmp_path / "scratch"
+    assert not check_preprocess_complete(ims, input_root, output_root).complete
+
+    paths = output_paths(ims, output_root / "group")
+    movie = np.ones((3, 4, 5), dtype=np.uint16)
+    paths.raw_tiff.parent.mkdir(parents=True)
+    paths.motion_corrected_tiff.parent.mkdir(parents=True)
+    tifffile.imwrite(paths.raw_tiff, movie, photometric="minisblack")
+    tifffile.imwrite(paths.motion_corrected_tiff, movie, photometric="minisblack")
+    save_projections(movie, paths)
+    paths.manifest.write_text(
+        '{"source_ims": "' + str(ims) + '", "status": "ready_for_roi"}'
+    )
+    check = check_preprocess_complete(ims, input_root, output_root)
+    assert check.complete
+    assert "verified" in check.reason
+
+    tifffile.imwrite(paths.max_projection, np.ones((4, 5), dtype=np.float32))
+    assert not check_preprocess_complete(ims, input_root, output_root).complete
