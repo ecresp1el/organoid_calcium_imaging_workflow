@@ -153,6 +153,9 @@ This creates only the relevant analysis assets in `analysis/`: raw ROI traces,
 adaptive F0, percentile-used, ΔF/F, smoothed ΔF/F, smoothed peaks, and a QC
 plot. The adaptive-percentile settings currently encoded in the workflow are a
 30-second window, activity fraction `0.3`, and low/high percentiles `10`/`10`.
+The frozen event detector then uses local maxima in the one-second-smoothed
+ΔF/F trace with height at least `median + 3.0 MADσ` and prominence at least
+`1.5 MADσ`; it uses neither an absolute ΔF/F cutoff nor a minimum-distance rule.
 
 ## Stage 4: pool an imported MGEO cohort by condition
 

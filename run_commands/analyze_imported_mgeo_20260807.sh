@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stage 3: adaptive-F0 traces, peaks, CSVs, and QC plots for the 9 imported MGEO labels.
+# Stage 3: adaptive-F0 traces, frozen C2 peaks, CSVs, and QC plots for imported MGEO labels.
 # Default is a dry run. Pass --run to write analysis; pass --overwrite only to recompute.
 set -euo pipefail
 SOURCE="/Volumes/Manny4TBUM/gaillard/Exp1_Ca_Imaging"

@@ -14,6 +14,12 @@ from scipy.signal import find_peaks
 import tifffile
 
 
+# Frozen after visual comparison of A-D and C1-C4 candidate detector QC plots.
+PEAK_DETECTOR_NAME = "robust_height_3.0_madsigma_prominence_1.5_madsigma"
+PEAK_HEIGHT_MADSIGMA = 3.0
+PEAK_PROMINENCE_MADSIGMA = 1.5
+
+
 def extract_traces(movie_path: Path, roi_path: Path) -> dict[int, np.ndarray]:
     movie = tifffile.memmap(movie_path)
     labels = tifffile.imread(roi_path)
@@ -67,6 +73,22 @@ def compute_adaptive_percentile_f0(
     return np.where(np.isfinite(f0) & (f0 > 0), f0, eps), percentile_used, window_frames
 
 
+def _robust_peak_parameters(values: np.ndarray) -> tuple[np.ndarray, float, float, float]:
+    """Prepare a smoothed trace and frozen C2 robust detector thresholds."""
+    values = np.asarray(values, dtype=float)
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return np.zeros_like(values), 0.0, np.finfo(float).eps, np.inf
+    median = float(np.median(finite))
+    mad_sigma = float(1.4826 * np.median(np.abs(finite - median)))
+    if not np.isfinite(mad_sigma) or mad_sigma <= 0:
+        mad_sigma = float(np.std(finite))
+    mad_sigma = mad_sigma if np.isfinite(mad_sigma) and mad_sigma > 0 else np.finfo(float).eps
+    # Centered smoothing introduces edge NaNs. Replacing only those values with
+    # the median prevents edges from being falsely detected as events.
+    return np.where(np.isfinite(values), values, median), median, mad_sigma, median + PEAK_HEIGHT_MADSIGMA * mad_sigma
+
+
 def analyze_traces(traces: dict[int, np.ndarray], fps: float, f0_window_seconds: float = 30.0, smooth_seconds: float = 1.0) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     if fps <= 0:
         raise ValueError("fps must be positive.")
@@ -85,10 +107,31 @@ def analyze_traces(traces: dict[int, np.ndarray], fps: float, f0_window_seconds:
     rows = []
     for roi_id in smooth:
         values = smooth[roi_id].to_numpy()
-        threshold = float(np.nanmean(values) + np.nanstd(values))
-        peaks, _ = find_peaks(values, height=threshold)
-        rows.extend({"roi": roi_id, "frame": int(frame), "time_seconds": frame / fps, "dff_smoothed": float(values[frame]), "threshold": threshold} for frame in peaks)
-    return raw, f0, percentile_used, dff, smooth, pd.DataFrame(rows)
+        detection_values, median, mad_sigma, threshold = _robust_peak_parameters(values)
+        peaks, _ = find_peaks(
+            detection_values,
+            height=threshold,
+            prominence=PEAK_PROMINENCE_MADSIGMA * mad_sigma,
+        )
+        rows.extend(
+            {
+                "roi": roi_id,
+                "frame": int(frame),
+                "time_seconds": frame / fps,
+                "dff_smoothed": float(values[frame]),
+                "threshold": threshold,
+                "baseline_median": median,
+                "noise_madsigma": mad_sigma,
+                "prominence_threshold": PEAK_PROMINENCE_MADSIGMA * mad_sigma,
+                "detector": PEAK_DETECTOR_NAME,
+            }
+            for frame in peaks
+        )
+    peak_columns = [
+        "roi", "frame", "time_seconds", "dff_smoothed", "threshold",
+        "baseline_median", "noise_madsigma", "prominence_threshold", "detector",
+    ]
+    return raw, f0, percentile_used, dff, smooth, pd.DataFrame(rows, columns=peak_columns)
 
 
 def run_analysis(manifest_path: Path, roi_path: Path, fps: float) -> Path:
@@ -117,7 +160,7 @@ def run_analysis(manifest_path: Path, roi_path: Path, fps: float) -> Path:
     fig.tight_layout(); fig.savefig(output / "roi_dff_qc.png", dpi=180); plt.close(fig)
     payload["frame_rate_hz"] = fps
     payload["roi_labels"] = str(roi_path)
-    payload["analysis"] = {"directory": str(output), "raw_traces": str(output / "roi_traces_raw.csv"), "adaptive_f0": str(output / "roi_adaptive_f0.csv"), "adaptive_percentile_used": str(output / "roi_adaptive_percentile_used.csv"), "dff": str(output / "roi_dff.csv"), "smoothed_dff": str(output / "roi_dff_smoothed.csv"), "peaks": str(output / "roi_peaks_smoothed.csv"), "qc_plot": str(output / "roi_dff_qc.png")}
+    payload["analysis"] = {"directory": str(output), "raw_traces": str(output / "roi_traces_raw.csv"), "adaptive_f0": str(output / "roi_adaptive_f0.csv"), "adaptive_percentile_used": str(output / "roi_adaptive_percentile_used.csv"), "dff": str(output / "roi_dff.csv"), "smoothed_dff": str(output / "roi_dff_smoothed.csv"), "peaks": str(output / "roi_peaks_smoothed.csv"), "qc_plot": str(output / "roi_dff_qc.png"), "peak_detector": PEAK_DETECTOR_NAME, "peak_height_madsigma": PEAK_HEIGHT_MADSIGMA, "peak_prominence_madsigma": PEAK_PROMINENCE_MADSIGMA}
     payload["status"] = "analysis_complete"
     manifest_path.write_text(json.dumps(payload, indent=2) + "\n")
     return output

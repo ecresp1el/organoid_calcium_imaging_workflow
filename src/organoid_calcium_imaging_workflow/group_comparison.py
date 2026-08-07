@@ -338,6 +338,7 @@ def compare_imported_mgeo(scratch_root: Path) -> dict[str, object]:
     (output / "README.txt").write_text(
         "MGEO-Control vs MGEO-Patient pooled Stage 3 results\n\n"
         "Source: existing roi_dff_smoothed.csv and roi_peaks_smoothed.csv for imported MGEO labels.\n"
+        "Frozen Stage 3 detector: local maxima on 1-second-smoothed dF/F with height >= median + 3.0 MADsigma and prominence >= 1.5 MADsigma; no absolute amplitude cutoff or minimum-distance rule.\n"
         "Metrics reproduce the previous across-recordings script: count, count/duration, median peak amplitude, median FWHM at rel_height=0.5, and median event area.\n"
         "The filtered CSV and plots use its historical within-condition 1.5x-IQR row filter on count, rate, and amplitude. The all-metrics CSV is unfiltered.\n"
         f"Active is defined as at least {ACTIVITY_MIN_EVENTS} events from the existing smoothed adaptive-F0 peak detector. Active-only outputs filter existing per-ROI results and do not recompute movies or traces.\n"

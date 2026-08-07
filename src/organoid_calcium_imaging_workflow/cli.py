@@ -13,6 +13,7 @@ from .legacy_import import import_legacy_mgeo_labels
 from .mgeo_analysis import analyze_imported_mgeo
 from .group_comparison import compare_imported_mgeo
 from .scratch_label_import import import_labels_from_scratch
+from .peak_detector_qc import generate_mgeo_peak_detector_qc, generate_mgeo_prominence_sweep_qc
 
 
 def main() -> None:
@@ -51,6 +52,10 @@ def main() -> None:
     import_scratch.add_argument("--target-scratch-root", type=Path, required=True)
     import_scratch.add_argument("--group", action="append", default=[], help="Only import these group directory names; may be given more than once.")
     import_scratch.add_argument("--apply", action="store_true", help="Copy only nonempty, geometry-matched labels with no active target conflict.")
+    detector_qc = commands.add_parser("mgeo-peak-detector-qc", help="Generate visual A-D peak-detector comparisons without changing Stage 3 results.")
+    detector_qc.add_argument("--scratch-root", type=Path, required=True)
+    prominence_sweep = commands.add_parser("mgeo-prominence-sweep-qc", help="Generate C1-C4 robust height/prominence comparisons without changing Stage 3.")
+    prominence_sweep.add_argument("--scratch-root", type=Path, required=True)
     manual_mask = commands.add_parser("add-manual-masks", help="Import a compatible external 2D ROI-label TIFF.")
     manual_mask.add_argument("--manifest", type=Path, required=True)
     manual_mask.add_argument("--mask", type=Path, required=True)
@@ -140,11 +145,15 @@ def main() -> None:
         for number, result in enumerate(results, start=1):
             print(f"[scratch-label-import] {number}/{len(results)} " + json.dumps(result, sort_keys=True))
         print("[scratch-label-import] " + json.dumps({status: sum(result["status"] == status for result in results) for status in sorted({str(result["status"]) for result in results})}, sort_keys=True))
+    if args.command == "mgeo-peak-detector-qc":
+        print("[mgeo-detector-qc] " + json.dumps(generate_mgeo_peak_detector_qc(args.scratch_root), sort_keys=True))
+    if args.command == "mgeo-prominence-sweep-qc":
+        print("[mgeo-prominence-sweep] " + json.dumps(generate_mgeo_prominence_sweep_qc(args.scratch_root), sort_keys=True))
     if args.command == "add-manual-masks":
         record = add_manual_masks(args.manifest, args.mask, replace_active=args.replace_active)
         print(f"Manual mask imported: {record['active_roi_labels']}; roi_count={record['roi_count']}")
     if args.command == "analyze":
-        print(f"[analysis] fps={args.fps:g}; adaptive percentile F0 over 30 s; smoothing=1 s; peak threshold=mean+1 SD")
+        print(f"[analysis] fps={args.fps:g}; adaptive percentile F0 over 30 s; smoothing=1 s; peaks=median+3.0 MADsigma with prominence>=1.5 MADsigma")
         print(f"[analysis] complete: {run_analysis(args.manifest, args.roi, args.fps)}")
     if args.command == "preprocess-root":
         ims_paths = sorted(path for path in args.input_root.rglob("*.ims") if not path.name.startswith("._"))
