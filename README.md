@@ -183,3 +183,21 @@ for the existing metrics restricted to active ROIs.
 recording: all smoothed ΔF/F traces are vertically staggered, black dots mark
 the detected peaks, and trace color shows whether the ROI meets the five-event
 cutoff.
+
+### Add labels from a separate workflow scratch folder
+
+When collaborators return a copied scratch folder with completed labels, do a
+read-only compatibility audit first, then explicitly import the safe labels:
+
+```bash
+conda activate organoid-calcium-workflow
+./run_commands/import_mgeo_labels_20260807.sh
+./run_commands/import_mgeo_labels_20260807.sh --apply
+```
+
+This current launcher is deliberately restricted to `MGEO-Control` and
+`MGEO-Patient`. It accepts only nonempty 2D labels whose geometry exactly
+matches the target motion-corrected movie, copies each source label under
+`rois/imported/`, records provenance in the target manifest, and never
+replaces a different existing active label. After importing, rerun Stage 3 and
+the group comparison launcher; completed analyses resume and are skipped.

@@ -21,7 +21,7 @@ def analyze_imported_mgeo(scratch_root: Path, metadata_root: Path, dry_run: bool
     manifests = sorted(scratch_root.rglob("processing_manifest.json"))
     for manifest_path in manifests:
         payload = json.loads(manifest_path.read_text())
-        if "legacy_label_import" not in payload:
+        if "legacy_label_import" not in payload and "scratch_label_import" not in payload:
             continue
         relative_recording = manifest_path.parent.relative_to(scratch_root)
         metadata_dir = metadata_root / relative_recording.parent

@@ -235,3 +235,26 @@ existing outputs and does not rerun the movie or trace analysis.
 `per_recording_staggered_smoothed_dff/` contains one image per organoid/
 recording. Traces are vertically staggered, black dots are the detected events,
 and green versus gray identifies whether the ROI passes the five-event cutoff.
+
+## 7. Add ROI labels returned in another scratch folder
+
+For the current MGEO cohort, first inspect the proposed transfer; this does not
+copy or overwrite anything:
+
+```bash
+conda activate organoid-calcium-workflow
+./run_commands/import_mgeo_labels_20260807.sh
+```
+
+Only after the output reports the expected `ready` recordings, import them:
+
+```bash
+./run_commands/import_mgeo_labels_20260807.sh --apply
+./run_commands/analyze_imported_mgeo_20260807.sh --run
+./run_commands/compare_imported_mgeo_20260807.sh
+```
+
+The transfer accepts only nonempty label TIFFs with an exact target-movie
+geometry match. It keeps a provenance copy under `rois/imported/` and refuses
+to replace a different active mask, so a returned scratch folder cannot silently
+overwrite existing work.

@@ -12,6 +12,7 @@ from .analysis import run_analysis
 from .legacy_import import import_legacy_mgeo_labels
 from .mgeo_analysis import analyze_imported_mgeo
 from .group_comparison import compare_imported_mgeo
+from .scratch_label_import import import_labels_from_scratch
 
 
 def main() -> None:
@@ -45,6 +46,11 @@ def main() -> None:
     mgeo_analysis.add_argument("--overwrite", action="store_true")
     compare_mgeo = commands.add_parser("compare-imported-mgeo", help="Pool Stage-3 MGEO adaptive-F0 results by control versus patient condition.")
     compare_mgeo.add_argument("--scratch-root", type=Path, required=True)
+    import_scratch = commands.add_parser("import-labels-from-scratch", help="Safely copy compatible ROI labels from another workflow scratch folder.")
+    import_scratch.add_argument("--source-scratch-root", type=Path, required=True)
+    import_scratch.add_argument("--target-scratch-root", type=Path, required=True)
+    import_scratch.add_argument("--group", action="append", default=[], help="Only import these group directory names; may be given more than once.")
+    import_scratch.add_argument("--apply", action="store_true", help="Copy only nonempty, geometry-matched labels with no active target conflict.")
     manual_mask = commands.add_parser("add-manual-masks", help="Import a compatible external 2D ROI-label TIFF.")
     manual_mask.add_argument("--manifest", type=Path, required=True)
     manual_mask.add_argument("--mask", type=Path, required=True)
@@ -129,6 +135,11 @@ def main() -> None:
             raise SystemExit(1)
     if args.command == "compare-imported-mgeo":
         print("[mgeo-compare] " + json.dumps(compare_imported_mgeo(args.scratch_root), sort_keys=True))
+    if args.command == "import-labels-from-scratch":
+        results = import_labels_from_scratch(args.source_scratch_root, args.target_scratch_root, tuple(args.group), apply=args.apply)
+        for number, result in enumerate(results, start=1):
+            print(f"[scratch-label-import] {number}/{len(results)} " + json.dumps(result, sort_keys=True))
+        print("[scratch-label-import] " + json.dumps({status: sum(result["status"] == status for result in results) for status in sorted({str(result["status"]) for result in results})}, sort_keys=True))
     if args.command == "add-manual-masks":
         record = add_manual_masks(args.manifest, args.mask, replace_active=args.replace_active)
         print(f"Manual mask imported: {record['active_roi_labels']}; roi_count={record['roi_count']}")

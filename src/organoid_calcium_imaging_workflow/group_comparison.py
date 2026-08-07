@@ -120,7 +120,7 @@ def _recording_metrics(manifest_path: Path, scratch_root: Path) -> tuple[list[di
     if peaks.empty:
         peaks = pd.DataFrame(columns=["roi", "frame", "time_seconds", "dff_smoothed", "threshold"])
     recording = str(relative_recording)
-    provenance = payload.get("legacy_label_import", {})
+    provenance = payload.get("legacy_label_import", payload.get("scratch_label_import", {}))
     alignment_status = provenance.get("alignment_status", "imported_before_alignment_status_field")
     metric_rows: list[dict] = []
     event_rows: list[dict] = []
@@ -293,7 +293,7 @@ def compare_imported_mgeo(scratch_root: Path) -> dict[str, object]:
     recordings: list[str] = []
     for manifest_path in sorted(scratch_root.rglob("processing_manifest.json")):
         payload = json.loads(manifest_path.read_text())
-        if "legacy_label_import" not in payload or payload.get("status") != "analysis_complete":
+        if ("legacy_label_import" not in payload and "scratch_label_import" not in payload) or payload.get("status") != "analysis_complete":
             continue
         relative = manifest_path.parent.relative_to(scratch_root)
         if _condition(relative) is None:
