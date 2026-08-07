@@ -153,3 +153,33 @@ This creates only the relevant analysis assets in `analysis/`: raw ROI traces,
 adaptive F0, percentile-used, ΔF/F, smoothed ΔF/F, smoothed peaks, and a QC
 plot. The adaptive-percentile settings currently encoded in the workflow are a
 30-second window, activity fraction `0.3`, and low/high percentiles `10`/`10`.
+
+## Stage 4: pool an imported MGEO cohort by condition
+
+After Stage 3 has completed for the imported MGEO labels, pool the existing
+**smoothed adaptive-F0** results without recomputing movies, masks, or traces:
+
+```bash
+conda activate organoid-calcium-workflow
+./run_commands/compare_imported_mgeo_20260807.sh
+```
+
+For the current dataset this writes to
+`$SCRATCH/group_level/MGEO-Control_vs_MGEO-Patient/`. It contains unfiltered
+and historical-IQR-filtered per-ROI metrics, event records, an ROI-level
+Mann–Whitney summary, and an editable SVG/PNG comparison panel. The carried
+forward measures are event count, event rate, median peak amplitude, median
+FWHM, and median integrated event area. Read that folder's `README.txt` before
+interpreting the statistics: the historical test treats ROIs as observations,
+not recordings as independent biological replicates.
+
+The same folder also reports active versus inactive ROIs. Here **active means
+at least five events from the already-configured smoothed adaptive-F0 peak
+detector**. See `mgeo_roi_activity_by_condition.png`
+for counts/percentages and `mgeo_comparison_active_only_panels_legacy_iqr_filtered.png`
+for the existing metrics restricted to active ROIs.
+
+`per_recording_staggered_smoothed_dff/` contains one PNG and editable SVG per
+recording: all smoothed ΔF/F traces are vertically staggered, black dots mark
+the detected peaks, and trace color shows whether the ROI meets the five-event
+cutoff.

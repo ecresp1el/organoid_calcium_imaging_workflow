@@ -11,6 +11,7 @@ from .preprocessing import PreprocessConfig, check_preprocess_complete, preproce
 from .analysis import run_analysis
 from .legacy_import import import_legacy_mgeo_labels
 from .mgeo_analysis import analyze_imported_mgeo
+from .group_comparison import compare_imported_mgeo
 
 
 def main() -> None:
@@ -42,6 +43,8 @@ def main() -> None:
     mgeo_analysis.add_argument("--metadata-root", type=Path, required=True)
     mgeo_analysis.add_argument("--dry-run", action="store_true")
     mgeo_analysis.add_argument("--overwrite", action="store_true")
+    compare_mgeo = commands.add_parser("compare-imported-mgeo", help="Pool Stage-3 MGEO adaptive-F0 results by control versus patient condition.")
+    compare_mgeo.add_argument("--scratch-root", type=Path, required=True)
     manual_mask = commands.add_parser("add-manual-masks", help="Import a compatible external 2D ROI-label TIFF.")
     manual_mask.add_argument("--manifest", type=Path, required=True)
     manual_mask.add_argument("--mask", type=Path, required=True)
@@ -124,6 +127,8 @@ def main() -> None:
         print(f"[mgeo-analysis] complete={sum(result['status'] == 'complete' for result in results)} skipped={sum(result['status'] == 'skipped_existing_analysis' for result in results)} errors={len(failures)}")
         if failures:
             raise SystemExit(1)
+    if args.command == "compare-imported-mgeo":
+        print("[mgeo-compare] " + json.dumps(compare_imported_mgeo(args.scratch_root), sort_keys=True))
     if args.command == "add-manual-masks":
         record = add_manual_masks(args.manifest, args.mask, replace_active=args.replace_active)
         print(f"Manual mask imported: {record['active_roi_labels']}; roi_count={record['roi_count']}")

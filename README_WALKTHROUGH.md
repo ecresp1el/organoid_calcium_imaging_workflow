@@ -200,3 +200,38 @@ future stage and is not yet available.
    before treating any extracted traces or peaks as final.
 6. ROI-outline plus time-locked trace MP4 generation is not yet migrated into
    this streamlined repository; do not expect a Stage 4 MP4 command yet.
+
+## 6. Pool a completed imported MGEO cohort
+
+This optional cohort-level step is only for the imported MGEO labels after
+their Stage 3 adaptive-F0 analysis is complete. It does **not** touch the
+movies, ROIs, or per-recording analyses.
+
+```bash
+conda activate organoid-calcium-workflow
+./run_commands/compare_imported_mgeo_20260807.sh
+```
+
+It pools `MGEO-Control` against `MGEO-Patient` in:
+
+```text
+$SCRATCH/group_level/MGEO-Control_vs_MGEO-Patient/
+```
+
+Use `mgeo_comparison_panels_legacy_iqr_filtered.png` to view the five carried
+forward comparisons: event count, event rate, median peak amplitude, median
+FWHM, and median integrated area. `mgeo_roi_metrics_all.csv` is the complete
+per-ROI table; the `legacy_iqr_filtered` file and figure reproduce the old
+within-condition 1.5×IQR filtering. See the local `README.txt` for the exact
+definitions and the important limitation that the historical Mann–Whitney test
+uses ROIs—not recordings—as observations.
+
+The same folder includes `mgeo_roi_activity_by_condition.png`. An ROI is called
+**active** only when the current smoothed adaptive-F0 peak detector finds at
+least five events. `mgeo_comparison_active_only_panels_legacy_iqr_filtered.png`
+shows the same five metrics for that detector-defined active subset; it filters
+existing outputs and does not rerun the movie or trace analysis.
+
+`per_recording_staggered_smoothed_dff/` contains one image per organoid/
+recording. Traces are vertically staggered, black dots are the detected events,
+and green versus gray identifies whether the ROI passes the five-event cutoff.
