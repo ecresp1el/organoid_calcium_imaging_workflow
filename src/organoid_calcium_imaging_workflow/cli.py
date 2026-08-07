@@ -9,6 +9,8 @@ from pathlib import Path
 from .roi import add_manual_masks, adopt_scratch_root, annotate_in_napari, record_napari_roi_annotation, roi_queue, validate_roi_labels
 from .preprocessing import PreprocessConfig, check_preprocess_complete, preprocess_one
 from .analysis import run_analysis
+from .legacy_import import import_legacy_mgeo_labels
+from .mgeo_analysis import analyze_imported_mgeo
 
 
 def main() -> None:
@@ -30,6 +32,16 @@ def main() -> None:
     queue_selection.add_argument("--reopen", type=int, help="Open this displayed started-recording number in Napari.")
     adopt = commands.add_parser("adopt-scratch", help="Make a copied scratch folder usable at its new location.")
     adopt.add_argument("--scratch-root", type=Path, required=True)
+    legacy = commands.add_parser("import-legacy-mgeo-labels", help="Import independently made MGEO labels with validated geometry.")
+    legacy.add_argument("--label-root", type=Path, required=True)
+    legacy.add_argument("--scratch-root", type=Path, required=True)
+    legacy.add_argument("--apply", action="store_true", help="Write only labels that pass the registration rules.")
+    legacy.add_argument("--allow-weak-registration", action="store_true", help="Import weakly registered labels and mark them unverified in provenance.")
+    mgeo_analysis = commands.add_parser("analyze-imported-mgeo", help="Run adaptive-F0 analysis for imported MGEO manual labels.")
+    mgeo_analysis.add_argument("--scratch-root", type=Path, required=True)
+    mgeo_analysis.add_argument("--metadata-root", type=Path, required=True)
+    mgeo_analysis.add_argument("--dry-run", action="store_true")
+    mgeo_analysis.add_argument("--overwrite", action="store_true")
     manual_mask = commands.add_parser("add-manual-masks", help="Import a compatible external 2D ROI-label TIFF.")
     manual_mask.add_argument("--manifest", type=Path, required=True)
     manual_mask.add_argument("--mask", type=Path, required=True)
@@ -101,6 +113,17 @@ def main() -> None:
                 print("[roi-queue] no nonzero ROI labels were drawn; recording remains pending.")
     if args.command == "adopt-scratch":
         print(f"Scratch folder adopted: {args.scratch_root}; recordings={adopt_scratch_root(args.scratch_root)}")
+    if args.command == "import-legacy-mgeo-labels":
+        for result in import_legacy_mgeo_labels(args.label_root, args.scratch_root, apply=args.apply, allow_weak_registration=args.allow_weak_registration):
+            print("[legacy-mgeo] " + json.dumps(result, sort_keys=True))
+    if args.command == "analyze-imported-mgeo":
+        results = analyze_imported_mgeo(args.scratch_root, args.metadata_root, dry_run=args.dry_run, overwrite=args.overwrite)
+        for number, result in enumerate(results, start=1):
+            print(f"[mgeo-analysis] {number}/{len(results)} " + json.dumps(result, sort_keys=True))
+        failures = [result for result in results if result["status"] == "error"]
+        print(f"[mgeo-analysis] complete={sum(result['status'] == 'complete' for result in results)} skipped={sum(result['status'] == 'skipped_existing_analysis' for result in results)} errors={len(failures)}")
+        if failures:
+            raise SystemExit(1)
     if args.command == "add-manual-masks":
         record = add_manual_masks(args.manifest, args.mask, replace_active=args.replace_active)
         print(f"Manual mask imported: {record['active_roi_labels']}; roi_count={record['roi_count']}")
