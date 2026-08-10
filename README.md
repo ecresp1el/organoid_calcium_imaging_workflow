@@ -177,14 +177,14 @@ interpreting the statistics: the historical test treats ROIs as observations,
 not recordings as independent biological replicates.
 
 The same folder also reports active versus inactive ROIs. Here **active means
-at least five events from the already-configured smoothed adaptive-F0 peak
+at least three events from the already-configured smoothed adaptive-F0 peak
 detector**. See `mgeo_roi_activity_by_condition.png`
 for counts/percentages and `mgeo_comparison_active_only_panels_legacy_iqr_filtered.png`
 for the existing metrics restricted to active ROIs.
 
 `per_recording_staggered_smoothed_dff/` contains one PNG and editable SVG per
 recording: all smoothed ΔF/F traces are vertically staggered, black dots mark
-the detected peaks, and trace color shows whether the ROI meets the five-event
+the detected peaks, and trace color shows whether the ROI meets the three-event
 cutoff.
 
 ### Add labels from a separate workflow scratch folder

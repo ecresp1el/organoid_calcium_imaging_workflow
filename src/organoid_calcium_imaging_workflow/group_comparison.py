@@ -16,10 +16,17 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 import numpy as np
 import pandas as pd
 from scipy.signal import peak_widths
 from scipy.stats import mannwhitneyu
+import tifffile
+
+# Arial is installed on the target macOS environment and is used for exportable
+# publication panels; matplotlib falls back gracefully elsewhere.
+matplotlib.rcParams["font.family"] = "Arial"
+matplotlib.rcParams["font.size"] = 8
 
 
 GROUPS = ("MGEO-Control", "MGEO-Patient")
@@ -32,8 +39,30 @@ METRICS = (
 )
 # This is the same historical filter used by the old across-recordings script.
 LEGACY_IQR_FILTER_METRICS = ("peak_count", "peak_rate_hz", "peak_amplitude")
-GROUP_COLORS = {"MGEO-Control": "#666666", "MGEO-Patient": "#6a1b9a"}
-ACTIVITY_MIN_EVENTS = 5
+GROUP_COLORS = {"MGEO-Control": "#3E3E3E", "MGEO-Patient": "#6E4A9E"}
+BOX_COLORS = {"MGEO-Control": "#B5B5B5", "MGEO-Patient": "#BFA6DD"}
+# Fixed, deliberately separated monochrome palettes.  Assignment is always by
+# sorted source-recording identifier, never ROI or plotting order.
+RECORDING_PALETTES = {
+    "MGEO-Control": (
+        "#D9D9D9", "#C8C8C8", "#B7B7B7", "#A6A6A6", "#959595",
+        "#848484", "#737373", "#626262", "#515151", "#404040",
+        "#2F2F2F", "#1E1E1E", "#0D0D0D",
+    ),
+    "MGEO-Patient": (
+        "#E7D6EA", "#D4B9DA", "#C994C7", "#B07AB5", "#9E9AC8",
+        "#8A79B8", "#765DAA", "#6A51A3", "#543C8B", "#3F2873",
+    ),
+}
+ACTIVITY_MIN_EVENTS = 3
+# The initially selected highest-event Patient trace is intentionally omitted
+# from the manuscript panel at the user's request.  Keep the source recording
+# explicit so re-running the figure never silently restores it.
+TRACE_PANEL_EXCLUSIONS = {
+    "MGEO-Patient": {
+        "Patient-DS5-1/MGEO-Patient/Day110_DS5-1_MGEO_1_BiVe3GCaMP6/DS5-1_mgeo1_bive3gcamp6_40x_Confocal - Green_2026-07-16",
+    },
+}
 
 
 def _condition(relative_recording: Path) -> str | None:
@@ -286,6 +315,326 @@ def _legacy_roi_stats(metrics: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _nonparametric_comparisons(metrics: pd.DataFrame, population: str, filtering: str) -> pd.DataFrame:
+    """Independent two-sided Mann-Whitney tests for every metric and cohort."""
+    rows = []
+    for metric, _ in METRICS:
+        control = metrics.loc[metrics["condition"] == "MGEO-Control", metric].dropna()
+        patient = metrics.loc[metrics["condition"] == "MGEO-Patient", metric].dropna()
+        if control.empty or patient.empty:
+            continue
+        statistic, p_value = mannwhitneyu(control, patient, alternative="two-sided")
+        rows.append({
+            "population": population,
+            "filtering": filtering,
+            "metric": metric,
+            "group1": "MGEO-Control",
+            "group2": "MGEO-Patient",
+            "n_group1_rois": len(control),
+            "n_group2_rois": len(patient),
+            "mann_whitney_u": statistic,
+            "p_value_two_sided_unadjusted": p_value,
+        })
+    return pd.DataFrame(rows)
+
+
+def _format_p_value(p_value: float) -> str:
+    """Compact manuscript-style unadjusted P-value annotation."""
+    if p_value >= 0.05:
+        return "ns"
+    if p_value >= 0.001:
+        return rf"$P$ = {p_value:.3f}"
+    exponent = int(np.floor(np.log10(p_value)))
+    mantissa = p_value / (10 ** exponent)
+    return rf"$P = {mantissa:.1f} \times 10^{{{exponent}}}$"
+
+
+def _representative_recording_figure(metrics: pd.DataFrame, scratch_root: Path, condition: str, output: Path) -> tuple[Path, list[dict]]:
+    """Plot a median-like recording with its five highest-event-count ROIs."""
+    condition_metrics = metrics.loc[metrics["condition"] == condition].copy()
+    per_recording = condition_metrics.groupby("recording", as_index=False).agg(median_event_count=("peak_count", "median"))
+    target = float(per_recording["median_event_count"].median())
+    selected_recording = per_recording.assign(distance=lambda frame: (frame["median_event_count"] - target).abs()).sort_values(["distance", "recording"]).iloc[0]["recording"]
+    selected = condition_metrics.loc[condition_metrics["recording"] == selected_recording].sort_values(["peak_count", "peak_amplitude", "roi"], ascending=[False, False, True]).head(5).copy()
+    manifest_path = scratch_root / selected_recording / "processing_manifest.json"
+    payload = json.loads(manifest_path.read_text())
+    labels = tifffile.imread(manifest_path.parent / "rois" / "roi_labels.tif")
+    max_projection = tifffile.imread(manifest_path.parent / "projections" / "max_projection.tif")
+    traces = pd.read_csv(manifest_path.parent / "analysis" / "roi_dff_smoothed.csv", index_col="frame")
+    peaks = pd.read_csv(manifest_path.parent / "analysis" / "roi_peaks_smoothed.csv")
+    fps = float(payload["frame_rate_hz"])
+    time = traces.index.to_numpy(dtype=float) / fps
+    fig, (ax_image, ax_trace) = plt.subplots(1, 2, figsize=(15, 6), gridspec_kw={"width_ratios": [1, 1.35]})
+    lo, hi = np.percentile(max_projection, [1, 99.8])
+    ax_image.imshow(max_projection, cmap="gray", vmin=lo, vmax=hi)
+    colors = plt.get_cmap("tab10")(np.arange(len(selected)))
+    for rank, ((_, row), color) in enumerate(zip(selected.iterrows(), colors), start=1):
+        roi = int(row["roi"])
+        mask = labels == roi
+        ax_image.contour(mask, levels=[0.5], colors=[color], linewidths=1.5)
+        yy, xx = np.where(mask)
+        ax_image.text(float(np.mean(xx)), float(np.mean(yy)), str(rank), color="white", ha="center", va="center", fontsize=9, weight="bold", bbox={"facecolor": color, "edgecolor": "none", "alpha": 0.9, "boxstyle": "circle,pad=0.18"})
+    ax_image.set_title("Max projection with top-five ROI outlines")
+    ax_image.axis("off")
+    selected = selected.reset_index(drop=True)
+    values = traces[[str(int(roi)) for roi in selected["roi"]]].to_numpy(dtype=float)
+    spacing = max(0.15, float(np.nanpercentile(values, 95) - np.nanpercentile(values, 5)) * 1.4)
+    for rank, (row, color) in enumerate(zip(selected.itertuples(index=False), colors), start=1):
+        roi = int(row.roi)
+        offset = (len(selected) - rank) * spacing
+        trace = traces[str(roi)].to_numpy(dtype=float)
+        ax_trace.plot(time, trace + offset, color=color, linewidth=1.0, label=f"{rank}. ROI {roi}: {int(row.peak_count)} events")
+        roi_peaks = peaks.loc[peaks["roi"] == roi]
+        if not roi_peaks.empty:
+            frames = roi_peaks["frame"].to_numpy(dtype=int)
+            ax_trace.scatter(time[frames], trace[frames] + offset, color="black", s=10, zorder=3)
+    ax_trace.set_title("Top five ROIs by C2 event count")
+    ax_trace.set_xlabel("Time (s)")
+    ax_trace.set_ylabel("Staggered smoothed ΔF/F")
+    ax_trace.legend(loc="upper right", fontsize=8, frameon=False)
+    ax_trace.grid(axis="x", alpha=0.2)
+    fig.suptitle(f"{condition} representative recording\n{selected_recording}", fontsize=10)
+    fig.tight_layout()
+    path = output / f"{condition}_representative_recording_top5_rois.png"
+    fig.savefig(path, dpi=220, bbox_inches="tight")
+    fig.savefig(path.with_suffix(".svg"), bbox_inches="tight")
+    plt.close(fig)
+    rows = []
+    for rank, row in enumerate(selected.itertuples(index=False), start=1):
+        rows.append({"condition": condition, "recording": selected_recording, "recording_median_event_count": target, "selection_rule": "recording median peak_count closest to condition median; top five ROIs by peak_count", "rank": rank, "roi": int(row.roi), "peak_count": int(row.peak_count), "peak_amplitude": row.peak_amplitude})
+    return path, rows
+
+
+def _illustrative_recording(metrics: pd.DataFrame, condition: str) -> tuple[str, pd.DataFrame]:
+    """Select a high-activity example transparently, not as a typical recording."""
+    subset = metrics.loc[metrics["condition"] == condition].copy()
+    top5_mean = (
+        subset.sort_values(["recording", "peak_count", "peak_amplitude"], ascending=[True, False, False])
+        .groupby("recording").head(5).groupby("recording", as_index=False).agg(top5_mean_event_count=("peak_count", "mean"))
+    )
+    recording = top5_mean.sort_values(["top5_mean_event_count", "recording"], ascending=[False, True]).iloc[0]["recording"]
+    rois = subset.loc[subset["recording"] == recording].sort_values(["peak_count", "peak_amplitude", "roi"], ascending=[False, False, True]).head(5).copy()
+    return recording, rois
+
+
+def _illustrative_recording_panel(metrics: pd.DataFrame, scratch_root: Path, output: Path) -> list[dict]:
+    """Create a two-condition max-projection/top-five-trace illustrative panel."""
+    fig = plt.figure(figsize=(16, 11))
+    grid = fig.add_gridspec(2, 2, width_ratios=[1, 1.45], hspace=0.26, wspace=0.2)
+    selection_rows: list[dict] = []
+    for row_index, condition in enumerate(GROUPS):
+        recording, selected = _illustrative_recording(metrics, condition)
+        manifest_path = scratch_root / recording / "processing_manifest.json"
+        payload = json.loads(manifest_path.read_text())
+        labels = tifffile.imread(manifest_path.parent / "rois" / "roi_labels.tif")
+        image = tifffile.imread(manifest_path.parent / "projections" / "max_projection.tif")
+        traces = pd.read_csv(manifest_path.parent / "analysis" / "roi_dff_smoothed.csv", index_col="frame")
+        peaks = pd.read_csv(manifest_path.parent / "analysis" / "roi_peaks_smoothed.csv")
+        fps = float(payload["frame_rate_hz"])
+        colors = plt.get_cmap("tab10")(np.arange(len(selected)))
+        ax_image, ax_trace = fig.add_subplot(grid[row_index, 0]), fig.add_subplot(grid[row_index, 1])
+        lo, hi = np.percentile(image, [1, 99.8])
+        ax_image.imshow(image, cmap="gray", vmin=lo, vmax=hi)
+        for rank, ((_, metric), color) in enumerate(zip(selected.iterrows(), colors), start=1):
+            roi = int(metric["roi"])
+            mask = labels == roi
+            ax_image.contour(mask, levels=[0.5], colors=[color], linewidths=1.4)
+            yy, xx = np.where(mask)
+            ax_image.text(np.mean(xx), np.mean(yy), str(rank), color="white", ha="center", va="center", fontsize=8, weight="bold", bbox={"facecolor": color, "edgecolor": "none", "boxstyle": "circle,pad=0.16"})
+        ax_image.set_title(f"{condition}: illustrative high-activity example\nmax projection; outlines are top five C2 ROIs", fontsize=10)
+        ax_image.axis("off")
+        selected = selected.reset_index(drop=True)
+        values = traces[[str(int(roi)) for roi in selected["roi"]]].to_numpy(dtype=float)
+        spacing = max(0.15, float(np.nanpercentile(values, 95) - np.nanpercentile(values, 5)) * 1.4)
+        time = traces.index.to_numpy(dtype=float) / fps
+        for rank, (metric, color) in enumerate(zip(selected.itertuples(index=False), colors), start=1):
+            roi, offset = int(metric.roi), (len(selected) - rank) * spacing
+            trace = traces[str(roi)].to_numpy(dtype=float)
+            ax_trace.plot(time, trace + offset, color=color, linewidth=1.1)
+            events = peaks.loc[peaks["roi"] == roi]
+            if not events.empty:
+                frames = events["frame"].to_numpy(dtype=int)
+                ax_trace.scatter(time[frames], trace[frames] + offset, color="black", s=9, zorder=3)
+            selection_rows.append({"panel": "illustrative_high_activity", "condition": condition, "recording": recording, "selection_rule": "recording with greatest mean C2 event count among its top five ROIs; then top five ROIs by C2 event count", "rank": rank, "roi": roi, "peak_count": int(metric.peak_count)})
+        ax_trace.set_title("Top five C2 ROI traces (black dots = detected events)", fontsize=10)
+        ax_trace.set_xlabel("Time (s)")
+        ax_trace.set_ylabel("Staggered smoothed ΔF/F")
+        ax_trace.grid(axis="x", alpha=0.2)
+        ax_trace.text(0.01, 0.02, recording, transform=ax_trace.transAxes, fontsize=6.5, va="bottom", wrap=True)
+    fig.tight_layout()
+    path = output / "illustrative_high_activity_recordings_top5_rois.png"
+    fig.savefig(path, dpi=300, bbox_inches="tight")
+    fig.savefig(path.with_suffix(".svg"), bbox_inches="tight")
+    plt.close(fig)
+    return selection_rows
+
+
+def _cross_recording_trace_rows(metrics: pd.DataFrame, condition: str, n: int = 20) -> pd.DataFrame:
+    """Choose a balanced, high-activity set of C2 traces across recordings."""
+    subset = metrics.loc[metrics["condition"] == condition].sort_values(
+        ["recording", "peak_count", "peak_amplitude", "roi"], ascending=[True, False, False, True]
+    )
+    excluded = TRACE_PANEL_EXCLUSIONS.get(condition, set())
+    subset = subset.loc[~subset["recording"].isin(excluded)].copy()
+    subset["within_recording_rank"] = subset.groupby("recording").cumcount()
+    # First take one high-activity ROI from every available recording; only then
+    # take a second (and, if needed, later) ROI. This provides 20 traces without
+    # allowing one recording to dominate the visual examples.
+    return subset.sort_values(
+        ["within_recording_rank", "peak_count", "peak_amplitude", "recording", "roi"],
+        ascending=[True, False, False, True, True],
+    ).head(n).copy()
+
+
+def _cross_recording_traces(
+    metrics: pd.DataFrame,
+    scratch_root: Path,
+    axes: list[plt.Axes],
+    recording_colors: dict[tuple[str, str], str],
+) -> list[dict]:
+    """Draw 20 balanced high-activity ROI traces per group on one matched scale."""
+    groups_data: dict[str, list[tuple]] = {}
+    selection_rows: list[dict] = []
+    for condition in GROUPS:
+        traces_data = []
+        for item in _cross_recording_trace_rows(metrics, condition, n=20).reset_index(drop=True).itertuples(index=False):
+            manifest_path = scratch_root / item.recording / "processing_manifest.json"
+            payload = json.loads(manifest_path.read_text())
+            trace = pd.read_csv(manifest_path.parent / "analysis" / "roi_dff_smoothed.csv", index_col="frame")[str(int(item.roi))].to_numpy(dtype=float)
+            traces_data.append((item, trace, float(payload["frame_rate_hz"])))
+        groups_data[condition] = traces_data
+    all_traces = [trace for traces in groups_data.values() for _, trace, _ in traces]
+    common_seconds = max(10.0, np.floor(min(len(trace) / fps for traces in groups_data.values() for _, trace, fps in traces) / 10.0) * 10.0)
+    global_spread = max(float(np.nanpercentile(trace, 95) - np.nanpercentile(trace, 5)) for trace in all_traces)
+    spacing = max(0.10, global_spread * 0.92)
+    for ax, condition in zip(axes, GROUPS):
+        traces_data = groups_data[condition]
+        for rank, (item, trace, fps) in enumerate(traces_data, start=1):
+            offset = (len(traces_data) - rank) * spacing
+            time = np.arange(len(trace), dtype=float) / fps
+            keep = time <= common_seconds
+            ax.plot(time[keep], trace[keep] + offset, color=recording_colors[(condition, str(item.recording))], linewidth=1.08)
+            selection_rows.append({"panel": "cross_recording_top20", "condition": condition, "recording": item.recording, "selection_rule": "high-activity ROIs selected in balanced rounds across recordings, after explicit panel exclusions", "rank": rank, "roi": int(item.roi), "peak_count": int(item.peak_count)})
+        # Identical normalized scale-bar placement in both trace panels, kept
+        # in the lower margin so no calcium trace is obscured.
+        # Reserve the unused lower margin for the scale bar; its lines and
+        # labels remain wholly below the lowest trace in both panels.
+        bar_x, bar_y = common_seconds * 0.095, -0.85 * spacing
+        ax.plot([bar_x, bar_x + 15], [bar_y, bar_y], color="black", linewidth=1.0, solid_capstyle="butt")
+        ax.plot([bar_x, bar_x], [bar_y, bar_y + 0.15], color="black", linewidth=1.0, solid_capstyle="butt")
+        ax.text(bar_x + 7.5, bar_y - 0.13 * spacing, "15 s", ha="center", va="top", fontsize=14)
+        ax.text(bar_x - 0.015 * common_seconds, bar_y + 0.075, "0.15 ΔF/F", ha="right", va="center", fontsize=14, rotation=90)
+        ax.set_xlim(0, common_seconds)
+        ax.set_ylim(-1.12 * spacing, len(traces_data) * spacing + 0.18 * spacing)
+        ax.set_title("Control" if condition == "MGEO-Control" else "Patient", fontsize=17, fontweight="normal", pad=1)
+        ax.set_axis_off()
+    return selection_rows
+
+
+def _publication_recording_colors(metrics: pd.DataFrame) -> tuple[dict[tuple[str, str], str], pd.DataFrame]:
+    """Return a deterministic within-condition recording color mapping and QC table."""
+    colors: dict[tuple[str, str], str] = {}
+    rows: list[dict] = []
+    print("[publication-panel] recording/color QC")
+    print("  condition | roi_count | color_hex | recording")
+    for condition in GROUPS:
+        counts = (
+            metrics.loc[metrics["condition"] == condition]
+            .groupby("recording", as_index=False)
+            .agg(roi_count=("roi", "size"))
+            .sort_values("recording")
+            .reset_index(drop=True)
+        )
+        palette = RECORDING_PALETTES[condition]
+        if len(counts) > len(palette):
+            raise ValueError(f"No fixed recording palette is defined for {len(counts)} {condition} recordings.")
+        print(f"[publication-panel] {condition}: {len(counts)} independent recordings")
+        for row, color in zip(counts.itertuples(index=False), palette):
+            colors[(condition, str(row.recording))] = color
+            rows.append({"condition": condition, "recording": str(row.recording), "roi_count": int(row.roi_count), "color_hex": color})
+            print(f"  {condition} | {int(row.roi_count)} | {color} | {row.recording}")
+    return colors, pd.DataFrame(rows)
+
+
+def _publication_summary(metrics: pd.DataFrame, scratch_root: Path, output: Path) -> list[dict]:
+    """Create one compact horizontal publication-style panel composition."""
+    # Six matched panels in one horizontal manuscript-style row.
+    # Keep the established one-row, six-panel canvas and data coordinates.
+    fig = plt.figure(figsize=(42, 10))
+    grid = fig.add_gridspec(1, 6, width_ratios=[0.78, 0.78, 1.0, 1.0, 1.0, 1.0], wspace=0.23)
+    trace_axes = [fig.add_subplot(grid[0, 0]), fig.add_subplot(grid[0, 1])]
+    recording_colors, recording_color_table = _publication_recording_colors(metrics)
+    recording_color_table.to_csv(output / "recording_color_mapping.csv", index=False)
+    selection_rows = _cross_recording_traces(metrics, scratch_root, trace_axes, recording_colors)
+    trace_axes[0].text(-0.045, 1.035, "A", transform=trace_axes[0].transAxes, fontsize=18, fontweight="bold", va="top")
+    trace_axes[1].text(-0.045, 1.035, "B", transform=trace_axes[1].transAxes, fontsize=18, fontweight="bold", va="top")
+    comparison_lookup = _nonparametric_comparisons(metrics, "all_rois", "unfiltered").set_index("metric")
+    box_axes = [fig.add_subplot(grid[0, column]) for column in range(2, 6)]
+    panel_letters = ["D", "E", "F", "G"]
+    figure_metrics = (
+        ("peak_rate_hz", "Event rate (Hz)"),
+        ("peak_amplitude", "Peak amplitude (ΔF/F)"),
+        ("peak_fwhm_sec", "FWHM (s)"),
+        ("peak_integrated_area", "Event area (ΔF/F·s)"),
+    )
+    for ax, (letter, (metric, label)) in zip(box_axes, zip(panel_letters, figure_metrics)):
+        subsets = [
+            metrics.loc[metrics["condition"] == condition, ["recording", metric]].dropna(subset=[metric])
+            for condition in GROUPS
+        ]
+        values = [subset[metric].to_numpy() for subset in subsets]
+        rng = np.random.default_rng(20260807 + panel_letters.index(letter))
+        positions = [-0.32, 0.32]
+        for xpos, (condition, subset) in zip(positions, zip(GROUPS, subsets)):
+            for recording, recording_values in subset.groupby("recording", sort=True):
+                values_for_recording = recording_values[metric].to_numpy()
+                jitter = rng.uniform(-0.16, 0.16, len(values_for_recording))
+                ax.scatter(
+                    xpos + jitter,
+                    values_for_recording,
+                    s=18,
+                    color=recording_colors[(condition, str(recording))],
+                    alpha=0.68,
+                    linewidths=0,
+                    rasterized=True,
+                    zorder=3,
+                )
+        boxes = ax.boxplot(
+            values, positions=positions, widths=0.18, capwidths=0.07, patch_artist=True,
+            showfliers=False, whis=1.5,
+            medianprops={"color": "black", "linewidth": 1.6},
+            boxprops={"edgecolor": "black", "linewidth": 0.65},
+            whiskerprops={"color": "black", "linewidth": 0.65},
+            capprops={"color": "black", "linewidth": 0.65},
+        )
+        for patch, condition in zip(boxes["boxes"], GROUPS):
+            patch.set_facecolor(BOX_COLORS[condition])
+            patch.set_alpha(0.09)
+            patch.set_zorder(1)
+        for line in [*boxes["whiskers"], *boxes["caps"]]:
+            line.set_zorder(1)
+        for line in boxes["medians"]:
+            line.set_zorder(4)
+        ax.set_xticks(positions, ["Control", "Patient"], rotation=0)
+        ax.set_xlim(-0.58, 0.58)
+        ax.set_title(label, fontsize=17, fontweight="normal", y=1.105, pad=0)
+        ax.yaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.tick_params(axis="y", labelsize=14, width=0.7, length=2.5, direction="out")
+        ax.tick_params(axis="x", labelsize=15, width=0.7, length=2.5, direction="out")
+        ax.spines[["top", "right"]].set_visible(False)
+        ax.spines[["left", "bottom"]].set_linewidth(0.7)
+        p_value = float(comparison_lookup.loc[metric, "p_value_two_sided_unadjusted"])
+        p_text = _format_p_value(p_value)
+        ax.text(0.5, 1.045, p_text, transform=ax.transAxes, ha="center", va="bottom", fontsize=14)
+        ax.text(-0.08, 1.07, letter, transform=ax.transAxes, fontsize=18, fontweight="bold", va="top")
+    fig.subplots_adjust(left=0.055, right=0.99, top=0.86, bottom=0.18)
+    path = output / "mgeo_c2_publication_style_summary.png"
+    fig.savefig(path, dpi=300, bbox_inches="tight")
+    fig.savefig(path.with_suffix(".svg"), bbox_inches="tight")
+    plt.close(fig)
+    return selection_rows
+
+
 def compare_imported_mgeo(scratch_root: Path) -> dict[str, object]:
     """Pool all Stage-3-complete imported MGEO masks and write group outputs."""
     metric_rows: list[dict] = []
@@ -328,6 +677,13 @@ def compare_imported_mgeo(scratch_root: Path) -> dict[str, object]:
     active_filtered_metrics.to_csv(output / "mgeo_roi_metrics_active_only_legacy_iqr_filtered.csv", index=False)
     _legacy_roi_stats(filtered_metrics).to_csv(output / "mgeo_comparison_stats_legacy_roi_level.csv", index=False)
     _legacy_roi_stats(active_filtered_metrics).to_csv(output / "mgeo_comparison_active_only_stats_legacy_roi_level.csv", index=False)
+    comparisons = pd.concat([
+        _nonparametric_comparisons(all_metrics, "all_rois", "unfiltered"),
+        _nonparametric_comparisons(active_all_metrics, "active_rois_at_least_5_events", "unfiltered"),
+        _nonparametric_comparisons(filtered_metrics, "all_rois", "legacy_iqr_filtered"),
+        _nonparametric_comparisons(active_filtered_metrics, "active_rois_at_least_5_events", "legacy_iqr_filtered"),
+    ], ignore_index=True)
+    comparisons.to_csv(output / "mgeo_nonparametric_comparisons.csv", index=False)
     _plot_metrics(filtered_metrics, output / "mgeo_comparison_panels_legacy_iqr_filtered.png")
     _plot_active_status(activity_summary, output / "mgeo_roi_activity_by_condition.png")
     _plot_metrics(active_filtered_metrics, output / "mgeo_comparison_active_only_panels_legacy_iqr_filtered.png", title_prefix="Active ROIs only — ")
@@ -335,6 +691,18 @@ def compare_imported_mgeo(scratch_root: Path) -> dict[str, object]:
         _plot_staggered_recording(scratch_root / recording / "processing_manifest.json", scratch_root, staggered_output)
         for recording in recordings
     ]
+    representative_dir = output / "representative_recordings"
+    representative_dir.mkdir(exist_ok=True)
+    representative_rows: list[dict] = []
+    for condition in GROUPS:
+        _, rows = _representative_recording_figure(all_metrics, scratch_root, condition, representative_dir)
+        representative_rows.extend(rows)
+    pd.DataFrame(representative_rows).to_csv(representative_dir / "representative_recording_selection.csv", index=False)
+    publication_dir = output / "publication_style_panels"
+    publication_dir.mkdir(exist_ok=True)
+    illustrative_rows = _illustrative_recording_panel(all_metrics, scratch_root, publication_dir)
+    cross_rows = _publication_summary(all_metrics, scratch_root, publication_dir)
+    pd.DataFrame(illustrative_rows + cross_rows).to_csv(publication_dir / "publication_panel_selection.csv", index=False)
     (output / "README.txt").write_text(
         "MGEO-Control vs MGEO-Patient pooled Stage 3 results\n\n"
         "Source: existing roi_dff_smoothed.csv and roi_peaks_smoothed.csv for imported MGEO labels.\n"
@@ -344,6 +712,9 @@ def compare_imported_mgeo(scratch_root: Path) -> dict[str, object]:
         f"Active is defined as at least {ACTIVITY_MIN_EVENTS} events from the existing smoothed adaptive-F0 peak detector. Active-only outputs filter existing per-ROI results and do not recompute movies or traces.\n"
         "per_recording_staggered_smoothed_dff contains one plot per recording. Each ROI is vertically offset but retains its dF/F values; black dots are the already-detected events.\n"
         "The statistics CSV is a two-sided Mann-Whitney U comparison with ROIs as observations; it is descriptive of the historical analysis and does not account for ROIs nested within recordings.\n"
+        f"mgeo_nonparametric_comparisons.csv reports independent two-sided Mann-Whitney U tests for all ROIs and for the >={ACTIVITY_MIN_EVENTS}-event active subset, each unfiltered and legacy-IQR-filtered. P-values are unadjusted.\n"
+        "representative_recordings selects, per condition, the recording whose median ROI event count is closest to its condition median and shows its five highest-event-count ROIs with max-projection outlines and traces.\n"
+        "publication_style_panels contains separately labeled high-activity illustrative examples and a cross-recording (one highest-event ROI per recording) trace-plus-boxplot summary. Selection rules are recorded in publication_panel_selection.csv. In the six-panel publication figure, point shades identify the source recording within each condition; the deterministic source-recording color map and ROI counts are recorded in publication_style_panels/recording_color_mapping.csv.\n"
         "label_alignment_status identifies labels that were imported with unverified weak registration.\n"
     )
     return {"output_directory": str(output), "recordings": len(recordings), "staggered_trace_figures": len(staggered_paths), "rois_all": len(all_metrics), "rois_after_legacy_iqr_filter": len(filtered_metrics), "active_rois": int(all_metrics["is_active"].sum()), "active_rois_after_legacy_iqr_filter": len(active_filtered_metrics), "events": len(event_rows)}
