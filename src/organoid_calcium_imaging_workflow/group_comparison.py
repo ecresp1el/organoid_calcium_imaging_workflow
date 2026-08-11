@@ -724,6 +724,20 @@ def compare_imported_mgeo(scratch_root: Path) -> dict[str, object]:
 
 FUSION_GROUPS = ("Fusion-Control", "Fusion-Patient")
 FUSION_COLORS = {"Fusion-Control": "#3E3E3E", "Fusion-Patient": "#6E4A9E"}
+# Deliberately separated, fixed within-condition shades for the returned Fusion
+# recordings. Assignment is by sorted recording identifier and is exported with
+# the figure, never inferred from ROI ordering.
+FUSION_RECORDING_PALETTES = {
+    "Fusion-Control": (
+        "#E0E0E0", "#D0D0D0", "#C0C0C0", "#B0B0B0", "#A0A0A0", "#909090", "#808080",
+        "#707070", "#606060", "#505050", "#404040", "#303030", "#202020", "#181818", "#101010",
+    ),
+    "Fusion-Patient": (
+        "#EFE6F2", "#E5D6EB", "#DBC6E3", "#D1B6DC", "#C7A6D4", "#BD96CD", "#B386C5",
+        "#A976BE", "#9F66B6", "#9556AF", "#8B46A7", "#81369F", "#772697", "#6D168F",
+        "#651083", "#5D0A77", "#55046B", "#4D005F", "#450054", "#3D0049", "#35003E",
+    ),
+}
 
 
 def _fusion_stats(metrics: pd.DataFrame, population: str, filtering: str) -> pd.DataFrame:
@@ -800,6 +814,130 @@ def _plot_fusion_activity(activity: pd.DataFrame, output: Path) -> None:
     plt.close(fig)
 
 
+def _fusion_publication_colors(metrics: pd.DataFrame) -> tuple[dict[tuple[str, str], str], pd.DataFrame]:
+    """Create the deterministic recording-shade mapping used by Fusion panel traces and points."""
+    colors: dict[tuple[str, str], str] = {}
+    rows: list[dict] = []
+    print("[fusion-publication] recording/color QC")
+    print("  condition | roi_count | color_hex | recording")
+    for condition in FUSION_GROUPS:
+        counts = (
+            metrics.loc[metrics["condition"] == condition]
+            .groupby("recording", as_index=False)
+            .agg(roi_count=("roi", "size"))
+            .sort_values("recording")
+            .reset_index(drop=True)
+        )
+        palette = FUSION_RECORDING_PALETTES[condition]
+        if len(counts) > len(palette):
+            raise ValueError(f"No fixed recording palette is defined for {len(counts)} {condition} recordings.")
+        for row, color in zip(counts.itertuples(index=False), palette):
+            recording = str(row.recording)
+            colors[(condition, recording)] = color
+            rows.append({"condition": condition, "recording": recording, "roi_count": int(row.roi_count), "color_hex": color})
+            print(f"  {condition} | {int(row.roi_count)} | {color} | {recording}")
+    return colors, pd.DataFrame(rows)
+
+
+def _fusion_cross_recording_rows(metrics: pd.DataFrame, condition: str, n: int = 20) -> pd.DataFrame:
+    """Cherry-pick the visually informative Fusion traces for a panel.
+
+    Control is ranked by detected-peak amplitude so its small but real signals
+    are visible; Patient is ranked by event count so its panel shows strongly
+    active examples. This affects only A/B, never the D-G distributions.
+    """
+    subset = metrics.loc[
+        (metrics["condition"] == condition) & (metrics["peak_count"] >= 2)
+    ].copy()
+    if condition == FUSION_GROUPS[0]:
+        order, ascending = ["peak_amplitude", "peak_count", "recording", "roi"], [False, False, True, True]
+    else:
+        order, ascending = ["peak_count", "peak_amplitude", "recording", "roi"], [False, False, True, True]
+    return subset.sort_values(order, ascending=ascending).head(n).copy()
+
+
+def _fusion_publication_summary(metrics: pd.DataFrame, scratch_root: Path, output: Path) -> list[dict]:
+    """Create the separate Fusion analogue of the locked MGEO six-panel display."""
+    fig = plt.figure(figsize=(42, 10))
+    grid = fig.add_gridspec(1, 6, width_ratios=[0.78, 0.78, 1.0, 1.0, 1.0, 1.0], wspace=0.23)
+    trace_axes = [fig.add_subplot(grid[0, 0]), fig.add_subplot(grid[0, 1])]
+    recording_colors, color_table = _fusion_publication_colors(metrics)
+    color_table.to_csv(output / "recording_color_mapping.csv", index=False)
+    selection_rows: list[dict] = []
+    groups_data: dict[str, list[tuple]] = {}
+    for condition in FUSION_GROUPS:
+        # Control has fewer detector-defined active cells.  Ten of its most
+        # visually informative multi-event ROIs are preferable to padding the
+        # panel with weak traces; Patient retains twenty examples.
+        selected = _fusion_cross_recording_rows(
+            metrics, condition, n=10 if condition == FUSION_GROUPS[0] else 20
+        ).reset_index(drop=True)
+        traces_data = []
+        for item in selected.itertuples(index=False):
+            manifest = scratch_root / item.recording / "processing_manifest.json"
+            payload = json.loads(manifest.read_text())
+            trace = pd.read_csv(manifest.parent / "analysis" / "roi_dff_smoothed.csv", index_col="frame")[str(int(item.roi))].to_numpy(dtype=float)
+            traces_data.append((item, trace, float(payload["frame_rate_hz"])))
+        groups_data[condition] = traces_data
+    common_seconds = max(10.0, np.floor(min(len(trace) / fps for values in groups_data.values() for _, trace, fps in values) / 10.0) * 10.0)
+    for letter, ax, condition in zip(("A", "B"), trace_axes, FUSION_GROUPS):
+        values = groups_data[condition]
+        panel_spread = max(float(np.nanpercentile(trace, 95) - np.nanpercentile(trace, 5)) for _, trace, _ in values)
+        spacing = max(0.025, panel_spread * 1.25)
+        for rank, (item, trace, fps) in enumerate(values, start=1):
+            offset = (len(values) - rank) * spacing
+            time = np.arange(len(trace), dtype=float) / fps
+            keep = time <= common_seconds
+            ax.plot(time[keep], trace[keep] + offset, color=recording_colors[(condition, str(item.recording))], linewidth=1.08)
+            selection_rule = (
+                "highest median detected-peak amplitude among ROIs with at least 2 events; peak count breaks ties; no recording-balance constraint"
+                if condition == FUSION_GROUPS[0]
+                else "highest event-count ROIs among ROIs with at least 2 events; peak amplitude breaks ties; no recording-balance constraint"
+            )
+            selection_rows.append({"panel": "representative_cherry_picked_traces", "condition": condition, "recording": str(item.recording), "selection_rule": selection_rule, "rank": rank, "roi": int(item.roi), "peak_count": int(item.peak_count), "peak_amplitude": float(item.peak_amplitude)})
+        bar_x, bar_y = common_seconds * 0.095, -0.85 * spacing
+        bar_height = 0.05 if condition == FUSION_GROUPS[0] else 0.15
+        ax.plot([bar_x, bar_x + 15], [bar_y, bar_y], color="black", linewidth=1.0, solid_capstyle="butt")
+        ax.plot([bar_x, bar_x], [bar_y, bar_y + bar_height], color="black", linewidth=1.0, solid_capstyle="butt")
+        ax.text(bar_x + 7.5, bar_y - 0.13 * spacing, "15 s", ha="center", va="top", fontsize=14)
+        ax.text(bar_x - 0.015 * common_seconds, bar_y + bar_height / 2, f"{bar_height:.2f} ΔF/F", ha="right", va="center", fontsize=14, rotation=90)
+        ax.set_xlim(0, common_seconds)
+        ax.set_ylim(-1.12 * spacing, len(values) * spacing + 0.18 * spacing)
+        ax.set_title("Control" if condition == FUSION_GROUPS[0] else "Patient", fontsize=17, fontweight="normal", pad=1)
+        ax.text(-0.045, 1.035, letter, transform=ax.transAxes, fontsize=18, fontweight="bold", va="top")
+        ax.set_axis_off()
+    comparisons = _fusion_stats(metrics, "all_rois", "unfiltered").set_index("metric")
+    figure_metrics = (
+        ("peak_rate_hz", "Event rate (Hz)"), ("peak_amplitude", "Peak amplitude (ΔF/F)"),
+        ("peak_fwhm_sec", "FWHM (s)"), ("peak_integrated_area", "Event area (ΔF/F·s)"),
+    )
+    for index, (letter, (metric, label)) in enumerate(zip(("D", "E", "F", "G"), figure_metrics)):
+        ax = fig.add_subplot(grid[0, index + 2])
+        subsets = [metrics.loc[metrics["condition"] == condition, ["recording", metric]].dropna(subset=[metric]) for condition in FUSION_GROUPS]
+        positions = [-0.32, 0.32]
+        rng = np.random.default_rng(20260811 + index)
+        for xpos, (condition, subset) in zip(positions, zip(FUSION_GROUPS, subsets)):
+            for recording, recording_values in subset.groupby("recording", sort=True):
+                ax.scatter(xpos + rng.uniform(-0.16, 0.16, len(recording_values)), recording_values[metric], s=18, color=recording_colors[(condition, str(recording))], alpha=0.68, linewidths=0, rasterized=True, zorder=3)
+        boxes = ax.boxplot([subset[metric].to_numpy() for subset in subsets], positions=positions, widths=0.18, capwidths=0.07, patch_artist=True, showfliers=False, whis=1.5, medianprops={"color": "black", "linewidth": 1.6}, boxprops={"edgecolor": "black", "linewidth": 0.65}, whiskerprops={"color": "black", "linewidth": 0.65}, capprops={"color": "black", "linewidth": 0.65})
+        for patch, color in zip(boxes["boxes"], ("#B5B5B5", "#BFA6DD")):
+            patch.set_facecolor(color); patch.set_alpha(0.09); patch.set_zorder(1)
+        for line in [*boxes["whiskers"], *boxes["caps"]]: line.set_zorder(1)
+        for line in boxes["medians"]: line.set_zorder(4)
+        ax.set_xticks(positions, ["Control", "Patient"]); ax.set_xlim(-0.58, 0.58)
+        ax.set_title(label, fontsize=17, fontweight="normal", y=1.105, pad=0)
+        ax.yaxis.set_major_locator(MaxNLocator(nbins=4)); ax.tick_params(axis="y", labelsize=14, width=0.7, length=2.5, direction="out"); ax.tick_params(axis="x", labelsize=15, width=0.7, length=2.5, direction="out")
+        ax.spines[["top", "right"]].set_visible(False); ax.spines[["left", "bottom"]].set_linewidth(0.7)
+        ax.text(0.5, 1.045, _format_p_value(float(comparisons.loc[metric, "p_value_two_sided_unadjusted"])), transform=ax.transAxes, ha="center", va="bottom", fontsize=14)
+        ax.text(-0.08, 1.07, letter, transform=ax.transAxes, fontsize=18, fontweight="bold", va="top")
+    fig.subplots_adjust(left=0.055, right=0.99, top=0.86, bottom=0.18)
+    path = output / "fusion_c2_publication_style_summary.png"
+    fig.savefig(path, dpi=300, bbox_inches="tight")
+    fig.savefig(path.with_suffix(".svg"), bbox_inches="tight")
+    plt.close(fig)
+    return selection_rows
+
+
 def compare_imported_fusion(scratch_root: Path) -> dict[str, object]:
     """Pool existing Stage-3 Fusion results without changing the locked MGEO cohort.
 
@@ -856,10 +994,14 @@ def compare_imported_fusion(scratch_root: Path) -> dict[str, object]:
         _plot_staggered_recording(scratch_root / recording / "processing_manifest.json", scratch_root, staggered_output)
         for recording in recordings
     ]
+    publication_output = output / "publication_style_panels"
+    publication_output.mkdir(exist_ok=True)
+    publication_rows = _fusion_publication_summary(all_metrics, scratch_root, publication_output)
+    pd.DataFrame(publication_rows).to_csv(publication_output / "publication_panel_selection.csv", index=False)
     (output / "README.txt").write_text(
         "Fusion-Control versus Fusion-Patient pooled Stage 3 results\n\n"
         "This directory contains the same core output tables used for MGEO: unfiltered and historical-IQR-filtered ROI metrics, per-event metrics, active-only tables, ROI activity summary, independent ROI-level Mann-Whitney comparisons, and one staggered trace QC figure per recording.\n"
         "Frozen Stage 3 detector: adaptive 30-second F0; 1-second-smoothed dF/F; peak height >= median + 3.0 MADsigma and prominence >= 1.5 MADsigma; no absolute cutoff or minimum distance. Active means at least 3 detected events.\n"
-        "The statistics are unadjusted two-sided Mann-Whitney U tests with ROIs as observations; they are descriptive and do not model recording nesting. This Fusion output is separate from, and does not change, the locked MGEO final figure.\n"
+        "The statistics are unadjusted two-sided Mann-Whitney U tests with ROIs as observations; they are descriptive and do not model recording nesting. publication_style_panels contains the Fusion six-panel counterpart to the MGEO layout; its trace-selection rules and deterministic recording-shade map are recorded in CSV files alongside it. This Fusion output is separate from, and does not change, the locked MGEO final figure.\n"
     )
     return {"output_directory": str(output), "recordings": len(recordings), "staggered_trace_figures": len(staggered_paths), "rois_all": len(all_metrics), "active_rois": int(all_metrics["is_active"].sum()), "events": len(event_rows)}

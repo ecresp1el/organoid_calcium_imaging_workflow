@@ -244,4 +244,18 @@ This writes only Fusion results to
 per-ROI CSVs (unfiltered, active-only, and historical-IQR-filtered), activity
 counts, descriptive ROI-level Mann–Whitney comparisons, a pooled metric
 overview, and one staggered trace QC figure per recording. It does not alter
-the locked MGEO figure or data.
+the locked MGEO figure or data. The matching six-panel Fusion display is
+`publication_style_panels/fusion_c2_publication_style_summary.png`; its trace
+selection and deterministic recording-color mapping are saved beside it.
+
+### Fixed-example MGEO versus MGEO-CO grant figure
+
+To recreate the standalone 2×2-inch grant panel from existing group-level
+data, run:
+
+```bash
+./run_commands/create_grant_mgeo_vs_assembloid.sh
+```
+
+The new output folder contains the PNG, editable SVG/PDF, source data, and
+the fixed trace-selection record. It does not modify any existing figure.

@@ -301,4 +301,21 @@ $SCRATCH/group_level/Fusion-Control_vs_Fusion-Patient/
 ```
 
 Read its `README.txt` first. It contains all pooled source data and QC needed
-for subsequent Fusion plotting, without changing the locked MGEO cohort.
+for subsequent Fusion plotting, without changing the locked MGEO cohort. Its
+`publication_style_panels/fusion_c2_publication_style_summary.png` is the
+Fusion counterpart to the MGEO six-panel publication-style figure; its
+trace-selection and recording-color mappings are saved beside it as CSVs.
+
+## 10. Create the fixed-example MGEO versus MGEO-CO grant figure
+
+The standalone helper reads existing pooled MGEO/Fusion Stage 3 results; it
+does not rerun imaging analysis or modify the locked figures:
+
+```bash
+./run_commands/create_grant_mgeo_vs_assembloid.sh
+```
+
+It writes PNG, editable SVG/PDF, source-data and trace-selection CSVs, and a
+README to `$SCRATCH/group_level/grant_mgeo_vs_mgeo_co_activity/`. The two
+trace recordings are explicitly fixed in the launcher rather than selected
+automatically.

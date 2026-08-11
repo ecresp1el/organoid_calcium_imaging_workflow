@@ -12,6 +12,7 @@ from .analysis import run_analysis
 from .legacy_import import import_legacy_mgeo_labels
 from .mgeo_analysis import analyze_imported_labels, analyze_imported_mgeo
 from .group_comparison import compare_imported_fusion, compare_imported_mgeo
+from .grant_figure import create_mgeo_vs_assembloid_grant_figure
 from .scratch_label_import import import_labels_from_scratch
 from .peak_detector_qc import generate_mgeo_peak_detector_qc, generate_mgeo_prominence_sweep_qc
 
@@ -55,6 +56,11 @@ def main() -> None:
     compare_mgeo.add_argument("--scratch-root", type=Path, required=True)
     compare_fusion = commands.add_parser("compare-imported-fusion", help="Pool Stage-3 Fusion adaptive-F0 results by control versus patient condition.")
     compare_fusion.add_argument("--scratch-root", type=Path, required=True)
+    grant = commands.add_parser("grant-mgeo-vs-assembloid", help="Create the standalone fixed-example MGEO versus MGEO-CO grant figure.")
+    grant.add_argument("--scratch-root", type=Path, required=True)
+    grant.add_argument("--control-recording", type=Path, required=True)
+    grant.add_argument("--patient-recording", type=Path, required=True)
+    grant.add_argument("--output", type=Path, default=None)
     import_scratch = commands.add_parser("import-labels-from-scratch", help="Safely copy compatible ROI labels from another workflow scratch folder.")
     import_scratch.add_argument("--source-scratch-root", type=Path, required=True)
     import_scratch.add_argument("--target-scratch-root", type=Path, required=True)
@@ -158,6 +164,8 @@ def main() -> None:
         print("[mgeo-compare] " + json.dumps(compare_imported_mgeo(args.scratch_root), sort_keys=True))
     if args.command == "compare-imported-fusion":
         print("[fusion-compare] " + json.dumps(compare_imported_fusion(args.scratch_root), sort_keys=True))
+    if args.command == "grant-mgeo-vs-assembloid":
+        print("[grant-figure] " + json.dumps(create_mgeo_vs_assembloid_grant_figure(args.scratch_root, args.control_recording, args.patient_recording, args.output), sort_keys=True))
     if args.command == "import-labels-from-scratch":
         results = import_labels_from_scratch(args.source_scratch_root, args.target_scratch_root, tuple(args.group), apply=args.apply)
         for number, result in enumerate(results, start=1):
