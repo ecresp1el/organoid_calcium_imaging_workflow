@@ -65,9 +65,9 @@ TRACE_PANEL_EXCLUSIONS = {
 }
 
 
-def _condition(relative_recording: Path) -> str | None:
+def _condition(relative_recording: Path, groups: tuple[str, str] = GROUPS) -> str | None:
     for part in relative_recording.parts:
-        if part in GROUPS:
+        if part in groups:
             return part
     return None
 
@@ -131,10 +131,12 @@ def drop_legacy_iqr_outliers(df: pd.DataFrame) -> pd.DataFrame:
     return df.loc[keep].copy()
 
 
-def _recording_metrics(manifest_path: Path, scratch_root: Path) -> tuple[list[dict], list[dict]]:
+def _recording_metrics(
+    manifest_path: Path, scratch_root: Path, groups: tuple[str, str] = GROUPS
+) -> tuple[list[dict], list[dict]]:
     payload = json.loads(manifest_path.read_text())
     relative_recording = manifest_path.parent.relative_to(scratch_root)
-    condition = _condition(relative_recording)
+    condition = _condition(relative_recording, groups)
     if condition is None:
         return [], []
     analysis = manifest_path.parent / "analysis"
@@ -718,3 +720,146 @@ def compare_imported_mgeo(scratch_root: Path) -> dict[str, object]:
         "label_alignment_status identifies labels that were imported with unverified weak registration.\n"
     )
     return {"output_directory": str(output), "recordings": len(recordings), "staggered_trace_figures": len(staggered_paths), "rois_all": len(all_metrics), "rois_after_legacy_iqr_filter": len(filtered_metrics), "active_rois": int(all_metrics["is_active"].sum()), "active_rois_after_legacy_iqr_filter": len(active_filtered_metrics), "events": len(event_rows)}
+
+
+FUSION_GROUPS = ("Fusion-Control", "Fusion-Patient")
+FUSION_COLORS = {"Fusion-Control": "#3E3E3E", "Fusion-Patient": "#6E4A9E"}
+
+
+def _fusion_stats(metrics: pd.DataFrame, population: str, filtering: str) -> pd.DataFrame:
+    """ROI-level descriptive Mann-Whitney comparisons for the Fusion cohort."""
+    rows = []
+    for metric, _ in METRICS:
+        control = metrics.loc[metrics["condition"] == FUSION_GROUPS[0], metric].dropna()
+        patient = metrics.loc[metrics["condition"] == FUSION_GROUPS[1], metric].dropna()
+        if control.empty or patient.empty:
+            continue
+        statistic, p_value = mannwhitneyu(control, patient, alternative="two-sided")
+        rows.append(
+            {
+                "population": population,
+                "filtering": filtering,
+                "metric": metric,
+                "group1": FUSION_GROUPS[0],
+                "group2": FUSION_GROUPS[1],
+                "n_group1_rois": len(control),
+                "n_group2_rois": len(patient),
+                "mann_whitney_u": statistic,
+                "p_value_two_sided_unadjusted": p_value,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _plot_fusion_metric_panels(metrics: pd.DataFrame, output: Path) -> None:
+    """Write a compact, deliberately non-publication Fusion data overview."""
+    rng = np.random.default_rng(20260811)
+    fig, axes = plt.subplots(1, len(METRICS), figsize=(16, 4.2))
+    for ax, (metric, title) in zip(axes, METRICS):
+        values = [
+            metrics.loc[metrics["condition"] == group, metric].dropna().to_numpy()
+            for group in FUSION_GROUPS
+        ]
+        box = ax.boxplot(values, positions=[0, 0.75], widths=0.18, showfliers=False, patch_artist=True, whis=1.5)
+        for patch, group in zip(box["boxes"], FUSION_GROUPS):
+            patch.set_facecolor(FUSION_COLORS[group])
+            patch.set_alpha(0.12)
+            patch.set_edgecolor("black")
+        for group, xpos in zip(FUSION_GROUPS, [0, 0.75]):
+            subset = metrics.loc[metrics["condition"] == group, ["recording", metric]].dropna()
+            for recording, recording_values in subset.groupby("recording", sort=True):
+                shade = FUSION_COLORS[group]
+                jitter = rng.uniform(-0.14, 0.14, len(recording_values))
+                ax.scatter(xpos + jitter, recording_values[metric], s=15, color=shade, alpha=0.48, linewidths=0, zorder=3)
+        ax.set_xlim(-0.35, 1.1)
+        ax.set_xticks([0, 0.75], ["Control", "Patient"])
+        ax.set_title(title, fontsize=9)
+        ax.tick_params(labelsize=8)
+        ax.spines[["top", "right"]].set_visible(False)
+    fig.suptitle("Fusion-Control versus Fusion-Patient — pooled Stage 3 ROI metrics", fontsize=11)
+    fig.tight_layout()
+    fig.savefig(output, dpi=220, bbox_inches="tight")
+    fig.savefig(output.with_suffix(".svg"), bbox_inches="tight")
+    plt.close(fig)
+
+
+def _plot_fusion_activity(activity: pd.DataFrame, output: Path) -> None:
+    ordered = activity.set_index("condition").reindex(FUSION_GROUPS).fillna(0)
+    fig, ax = plt.subplots(figsize=(5, 3.6))
+    x = np.arange(2)
+    ax.bar(x, ordered["inactive_rois"], color="#D9D9D9", label=f"Inactive (<{ACTIVITY_MIN_EVENTS} events)")
+    ax.bar(x, ordered["active_rois"], bottom=ordered["inactive_rois"], color="#6E4A9E", label=f"Active (≥{ACTIVITY_MIN_EVENTS} events)")
+    ax.set_xticks(x, ["Control", "Patient"])
+    ax.set_ylabel("ROI count")
+    ax.set_title("Fusion ROI activity")
+    ax.legend(frameon=False, fontsize=8)
+    ax.spines[["top", "right"]].set_visible(False)
+    fig.tight_layout()
+    fig.savefig(output, dpi=220, bbox_inches="tight")
+    fig.savefig(output.with_suffix(".svg"), bbox_inches="tight")
+    plt.close(fig)
+
+
+def compare_imported_fusion(scratch_root: Path) -> dict[str, object]:
+    """Pool existing Stage-3 Fusion results without changing the locked MGEO cohort.
+
+    This is deliberately a data/QC handoff: it writes the same core per-ROI,
+    per-event, active-only, statistical, and per-recording outputs as the old
+    MGEO comparison, but does not create or alter MGEO's locked final figure.
+    """
+    metric_rows: list[dict] = []
+    event_rows: list[dict] = []
+    recordings: list[str] = []
+    for manifest_path in sorted(scratch_root.rglob("processing_manifest.json")):
+        payload = json.loads(manifest_path.read_text())
+        has_import = any(key in payload for key in ("legacy_label_import", "scratch_label_import", "manual_mask_imports"))
+        if not has_import or payload.get("status") != "analysis_complete":
+            continue
+        relative = manifest_path.parent.relative_to(scratch_root)
+        if _condition(relative, FUSION_GROUPS) is None:
+            continue
+        metrics, events = _recording_metrics(manifest_path, scratch_root, FUSION_GROUPS)
+        metric_rows.extend(metrics)
+        event_rows.extend(events)
+        recordings.append(str(relative))
+    if not metric_rows:
+        raise ValueError("No Stage-3-complete imported Fusion recordings were found.")
+
+    output = scratch_root / "group_level" / "Fusion-Control_vs_Fusion-Patient"
+    output.mkdir(parents=True, exist_ok=True)
+    staggered_output = output / "per_recording_staggered_smoothed_dff"
+    staggered_output.mkdir(exist_ok=True)
+    all_metrics = pd.DataFrame(metric_rows).sort_values(["condition", "recording", "roi"])
+    filtered_metrics = drop_legacy_iqr_outliers(all_metrics).sort_values(["condition", "recording", "roi"])
+    active_all_metrics = all_metrics.loc[all_metrics["is_active"]].copy()
+    active_filtered_metrics = drop_legacy_iqr_outliers(active_all_metrics).sort_values(["condition", "recording", "roi"])
+    activity = (
+        all_metrics.groupby("condition", as_index=False)
+        .agg(total_rois=("roi", "size"), active_rois=("is_active", "sum"))
+        .assign(inactive_rois=lambda frame: frame["total_rois"] - frame["active_rois"], active_percent=lambda frame: 100 * frame["active_rois"] / frame["total_rois"])
+    )
+    pd.DataFrame(event_rows).to_csv(output / "fusion_event_metrics_smoothed.csv", index=False)
+    all_metrics.to_csv(output / "fusion_roi_metrics_all.csv", index=False)
+    filtered_metrics.to_csv(output / "fusion_roi_metrics_legacy_iqr_filtered.csv", index=False)
+    active_all_metrics.to_csv(output / "fusion_roi_metrics_active_only_all.csv", index=False)
+    active_filtered_metrics.to_csv(output / "fusion_roi_metrics_active_only_legacy_iqr_filtered.csv", index=False)
+    activity.to_csv(output / "fusion_roi_activity_summary.csv", index=False)
+    pd.concat([
+        _fusion_stats(all_metrics, "all_rois", "unfiltered"),
+        _fusion_stats(active_all_metrics, f"active_rois_at_least_{ACTIVITY_MIN_EVENTS}_events", "unfiltered"),
+        _fusion_stats(filtered_metrics, "all_rois", "legacy_iqr_filtered"),
+        _fusion_stats(active_filtered_metrics, f"active_rois_at_least_{ACTIVITY_MIN_EVENTS}_events", "legacy_iqr_filtered"),
+    ], ignore_index=True).to_csv(output / "fusion_nonparametric_comparisons.csv", index=False)
+    _plot_fusion_metric_panels(all_metrics, output / "fusion_pooled_roi_metric_overview.png")
+    _plot_fusion_activity(activity, output / "fusion_roi_activity_by_condition.png")
+    staggered_paths = [
+        _plot_staggered_recording(scratch_root / recording / "processing_manifest.json", scratch_root, staggered_output)
+        for recording in recordings
+    ]
+    (output / "README.txt").write_text(
+        "Fusion-Control versus Fusion-Patient pooled Stage 3 results\n\n"
+        "This directory contains the same core output tables used for MGEO: unfiltered and historical-IQR-filtered ROI metrics, per-event metrics, active-only tables, ROI activity summary, independent ROI-level Mann-Whitney comparisons, and one staggered trace QC figure per recording.\n"
+        "Frozen Stage 3 detector: adaptive 30-second F0; 1-second-smoothed dF/F; peak height >= median + 3.0 MADsigma and prominence >= 1.5 MADsigma; no absolute cutoff or minimum distance. Active means at least 3 detected events.\n"
+        "The statistics are unadjusted two-sided Mann-Whitney U tests with ROIs as observations; they are descriptive and do not model recording nesting. This Fusion output is separate from, and does not change, the locked MGEO final figure.\n"
+    )
+    return {"output_directory": str(output), "recordings": len(recordings), "staggered_trace_figures": len(staggered_paths), "rois_all": len(all_metrics), "active_rois": int(all_metrics["is_active"].sum()), "events": len(event_rows)}

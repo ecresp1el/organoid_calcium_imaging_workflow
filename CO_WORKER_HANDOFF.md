@@ -93,3 +93,26 @@ The Stage 1 and Stage 2 handoff paths are tested on the 59-recording Gaillard
 dataset. Stage 3 adaptive-F0 analysis is available. ROI-outline plus
 time-locked trace MP4 generation has not yet been migrated, so this is not yet
 a complete replacement for that final legacy-pipeline stage.
+
+## Locked MGEO result and separate Fusion cohort
+
+The MGEO-Control versus MGEO-Patient detector choice, active-ROI definition,
+statistics, and six-panel publication figure are locked. See
+[`docs/MGEO_LOCKED_CONFIGURATION.md`](docs/MGEO_LOCKED_CONFIGURATION.md).
+
+Fusion labels are processed separately so they never alter the locked MGEO
+result:
+
+```bash
+./run_commands/import_fusion_labels.sh
+./run_commands/import_fusion_labels.sh --apply
+./run_commands/analyze_imported_fusion.sh --run
+./run_commands/compare_imported_fusion.sh
+```
+
+This transfer resumes safely and reports a different existing active ROI TIFF
+as a conflict instead of overwriting it.
+
+The final command writes Fusion-only pooled source data and QC to
+`group_level/Fusion-Control_vs_Fusion-Patient/`; it never alters the locked
+MGEO data or final figure.

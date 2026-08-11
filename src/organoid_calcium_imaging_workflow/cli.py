@@ -10,8 +10,8 @@ from .roi import add_manual_masks, adopt_scratch_root, annotate_in_napari, recor
 from .preprocessing import PreprocessConfig, check_preprocess_complete, preprocess_one
 from .analysis import run_analysis
 from .legacy_import import import_legacy_mgeo_labels
-from .mgeo_analysis import analyze_imported_mgeo
-from .group_comparison import compare_imported_mgeo
+from .mgeo_analysis import analyze_imported_labels, analyze_imported_mgeo
+from .group_comparison import compare_imported_fusion, compare_imported_mgeo
 from .scratch_label_import import import_labels_from_scratch
 from .peak_detector_qc import generate_mgeo_peak_detector_qc, generate_mgeo_prominence_sweep_qc
 
@@ -45,8 +45,16 @@ def main() -> None:
     mgeo_analysis.add_argument("--metadata-root", type=Path, required=True)
     mgeo_analysis.add_argument("--dry-run", action="store_true")
     mgeo_analysis.add_argument("--overwrite", action="store_true")
+    imported_analysis = commands.add_parser("analyze-imported-labels", help="Run adaptive-F0 analysis for imported labels in selected group directories.")
+    imported_analysis.add_argument("--scratch-root", type=Path, required=True)
+    imported_analysis.add_argument("--metadata-root", type=Path, required=True)
+    imported_analysis.add_argument("--group", action="append", required=True, help="Group directory to analyze; may be given more than once.")
+    imported_analysis.add_argument("--dry-run", action="store_true")
+    imported_analysis.add_argument("--overwrite", action="store_true")
     compare_mgeo = commands.add_parser("compare-imported-mgeo", help="Pool Stage-3 MGEO adaptive-F0 results by control versus patient condition.")
     compare_mgeo.add_argument("--scratch-root", type=Path, required=True)
+    compare_fusion = commands.add_parser("compare-imported-fusion", help="Pool Stage-3 Fusion adaptive-F0 results by control versus patient condition.")
+    compare_fusion.add_argument("--scratch-root", type=Path, required=True)
     import_scratch = commands.add_parser("import-labels-from-scratch", help="Safely copy compatible ROI labels from another workflow scratch folder.")
     import_scratch.add_argument("--source-scratch-root", type=Path, required=True)
     import_scratch.add_argument("--target-scratch-root", type=Path, required=True)
@@ -138,8 +146,18 @@ def main() -> None:
         print(f"[mgeo-analysis] complete={sum(result['status'] == 'complete' for result in results)} skipped={sum(result['status'] == 'skipped_existing_analysis' for result in results)} errors={len(failures)}")
         if failures:
             raise SystemExit(1)
+    if args.command == "analyze-imported-labels":
+        results = analyze_imported_labels(args.scratch_root, args.metadata_root, tuple(args.group), dry_run=args.dry_run, overwrite=args.overwrite)
+        for number, result in enumerate(results, start=1):
+            print(f"[imported-analysis] {number}/{len(results)} " + json.dumps(result, sort_keys=True))
+        failures = [result for result in results if result["status"] == "error"]
+        print(f"[imported-analysis] complete={sum(result['status'] == 'complete' for result in results)} skipped={sum(result['status'] == 'skipped_existing_analysis' for result in results)} errors={len(failures)}")
+        if failures:
+            raise SystemExit(1)
     if args.command == "compare-imported-mgeo":
         print("[mgeo-compare] " + json.dumps(compare_imported_mgeo(args.scratch_root), sort_keys=True))
+    if args.command == "compare-imported-fusion":
+        print("[fusion-compare] " + json.dumps(compare_imported_fusion(args.scratch_root), sort_keys=True))
     if args.command == "import-labels-from-scratch":
         results = import_labels_from_scratch(args.source_scratch_root, args.target_scratch_root, tuple(args.group), apply=args.apply)
         for number, result in enumerate(results, start=1):

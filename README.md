@@ -159,6 +159,14 @@ The frozen event detector then uses local maxima in the one-second-smoothed
 
 ## Stage 4: pool an imported MGEO cohort by condition
 
+### Locked MGEO final analysis
+
+The MGEO-Control versus MGEO-Patient detector settings, active-ROI rule,
+statistics, and six-panel publication figure are locked. See
+[MGEO_LOCKED_CONFIGURATION.md](docs/MGEO_LOCKED_CONFIGURATION.md) before
+making an MGEO-specific change. Fusion processing is separate and does not
+modify these locked MGEO outputs.
+
 After Stage 3 has completed for the imported MGEO labels, pool the existing
 **smoothed adaptive-F0** results without recomputing movies, masks, or traces:
 
@@ -204,3 +212,36 @@ matches the target motion-corrected movie, copies each source label under
 `rois/imported/`, records provenance in the target manifest, and never
 replaces a different existing active label. After importing, rerun Stage 3 and
 the group comparison launcher; completed analyses resume and are skipped.
+
+### Import and analyze returned Fusion labels
+
+Jonathan's returned Fusion labels use the same safe transfer pattern, but are
+kept separate from the locked MGEO cohort:
+
+```bash
+conda activate organoid-calcium-workflow
+./run_commands/import_fusion_labels.sh
+./run_commands/import_fusion_labels.sh --apply
+./run_commands/analyze_imported_fusion.sh --dry-run
+./run_commands/analyze_imported_fusion.sh --run
+```
+
+The importer copies only nonempty exact-geometry matches and never overwrites a
+different active target ROI TIFF. Re-running both commands safely resumes new
+imports and any incomplete analysis.
+
+### Pool the processed Fusion cohort
+
+Once Fusion Stage 3 is complete, create its separate, one-place group-level
+data handoff with:
+
+```bash
+./run_commands/compare_imported_fusion.sh
+```
+
+This writes only Fusion results to
+`$SCRATCH/group_level/Fusion-Control_vs_Fusion-Patient/`: per-event and
+per-ROI CSVs (unfiltered, active-only, and historical-IQR-filtered), activity
+counts, descriptive ROI-level Mann–Whitney comparisons, a pooled metric
+overview, and one staggered trace QC figure per recording. It does not alter
+the locked MGEO figure or data.

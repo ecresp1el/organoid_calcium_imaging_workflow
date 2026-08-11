@@ -203,6 +203,10 @@ future stage and is not yet available.
 
 ## 6. Pool a completed imported MGEO cohort
 
+The MGEO detector, active-ROI definition, statistics, and final six-panel
+figure are locked. The decision record is
+[`docs/MGEO_LOCKED_CONFIGURATION.md`](docs/MGEO_LOCKED_CONFIGURATION.md).
+
 This optional cohort-level step is only for the imported MGEO labels after
 their Stage 3 adaptive-F0 analysis is complete. It does **not** touch the
 movies, ROIs, or per-recording analyses.
@@ -258,3 +262,43 @@ The transfer accepts only nonempty label TIFFs with an exact target-movie
 geometry match. It keeps a provenance copy under `rois/imported/` and refuses
 to replace a different active mask, so a returned scratch folder cannot silently
 overwrite existing work.
+
+## 8. Import and analyze Jonathan's Fusion labels
+
+Fusion is processed separately and does not modify the locked MGEO outputs.
+Audit the returned-label scratch tree first, then import only safe labels:
+
+```bash
+conda activate organoid-calcium-workflow
+./run_commands/import_fusion_labels.sh
+./run_commands/import_fusion_labels.sh --apply
+```
+
+The importer refuses to overwrite a different active target mask. After any
+reported conflict is deliberately resolved, use the resumable Stage 3 batch:
+
+```bash
+./run_commands/analyze_imported_fusion.sh --dry-run
+./run_commands/analyze_imported_fusion.sh --run
+```
+
+It reads each recording's true frame rate from the source metadata text, writes
+only that recording's `analysis/` outputs, and skips completed analyses unless
+`--overwrite` is explicitly passed.
+
+## 9. Pool Fusion outputs in one place
+
+After all intended Fusion labels have completed Stage 3, run:
+
+```bash
+./run_commands/compare_imported_fusion.sh
+```
+
+The result is a separate folder:
+
+```text
+$SCRATCH/group_level/Fusion-Control_vs_Fusion-Patient/
+```
+
+Read its `README.txt` first. It contains all pooled source data and QC needed
+for subsequent Fusion plotting, without changing the locked MGEO cohort.

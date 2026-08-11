@@ -1,4 +1,4 @@
-"""Batch adaptive-F0 analysis for imported MGEO manual-label recordings."""
+"""Batch adaptive-F0 analysis for imported manual-label recordings."""
 
 from __future__ import annotations
 
@@ -16,14 +16,36 @@ def _device_frame_rate(metadata_path: Path) -> float:
     return float(values[0])
 
 
-def analyze_imported_mgeo(scratch_root: Path, metadata_root: Path, dry_run: bool = False, overwrite: bool = False) -> list[dict[str, object]]:
+def analyze_imported_labels(
+    scratch_root: Path,
+    metadata_root: Path,
+    groups: tuple[str, ...],
+    dry_run: bool = False,
+    overwrite: bool = False,
+) -> list[dict[str, object]]:
+    """Analyze imported labels from only the requested condition directories.
+
+    The group filter is evaluated from the existing recording path.  Analysis
+    runs only for labels with import provenance, so unrelated Napari work is
+    never silently included in a cohort batch.
+    """
     results: list[dict[str, object]] = []
     manifests = sorted(scratch_root.rglob("processing_manifest.json"))
     for manifest_path in manifests:
         payload = json.loads(manifest_path.read_text())
-        if "legacy_label_import" not in payload and "scratch_label_import" not in payload:
+        # ``manual_mask_imports`` is the explicit replacement/import route for
+        # a compatible external label.  Treat it like the other import
+        # provenance records so later batch runs resume it rather than silently
+        # omitting a deliberately replaced recording.
+        if (
+            "legacy_label_import" not in payload
+            and "scratch_label_import" not in payload
+            and "manual_mask_imports" not in payload
+        ):
             continue
         relative_recording = manifest_path.parent.relative_to(scratch_root)
+        if groups and not any(group in relative_recording.parts for group in groups):
+            continue
         metadata_dir = metadata_root / relative_recording.parent
         metadata_files = sorted(path for path in metadata_dir.glob("*_metadata.txt") if not path.name.startswith("._"))
         roi_path = manifest_path.parent / "rois" / "roi_labels.tif"
@@ -43,3 +65,14 @@ def analyze_imported_mgeo(scratch_root: Path, metadata_root: Path, dry_run: bool
                 result["status"] = "complete"
         results.append(result)
     return results
+
+
+def analyze_imported_mgeo(scratch_root: Path, metadata_root: Path, dry_run: bool = False, overwrite: bool = False) -> list[dict[str, object]]:
+    """Backward-compatible MGEO-specific launcher for the locked MGEO cohort."""
+    return analyze_imported_labels(
+        scratch_root,
+        metadata_root,
+        groups=("MGEO-Control", "MGEO-Patient"),
+        dry_run=dry_run,
+        overwrite=overwrite,
+    )
