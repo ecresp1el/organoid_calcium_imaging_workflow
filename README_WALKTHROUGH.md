@@ -171,7 +171,45 @@ Continue only when it reports `ROI validation passed` and a nonzero ROI count.
 The Stage 2 launcher validates automatically when you close Napari, so this
 direct validation command is mainly for checking an imported or edited mask.
 
-## 5. Run adaptive-F0 analysis
+## 5. Run Stage 3 adaptive-F0 analysis after ROIs are drawn
+
+### Analyze every ROI-ready recording (recommended)
+
+Once one or more recordings have a saved nonempty `rois/roi_labels.tif`, run
+the clean-project Stage 3 launcher. It discovers those recordings under the
+scratch root, verifies label/movie geometry, obtains each acquisition rate from
+the manifest or a metadata text file beside the original `.ims`, and writes
+only the recording's `analysis/` directory. Existing complete analyses are
+skipped; use `--overwrite` only to deliberately recompute them.
+
+First inspect the plan without changing files:
+
+```bash
+./run_commands/analyze_rois.sh --scratch "/path/to/your_scratch" --dry-run
+```
+
+Then run every ready recording:
+
+```bash
+./run_commands/analyze_rois.sh --scratch "/path/to/your_scratch"
+```
+
+For a safe first real test, analyze just one new recording:
+
+```bash
+./run_commands/analyze_rois.sh --scratch "/path/to/your_scratch" --limit 1
+```
+
+The terminal prints one JSON status per manifest plus a final summary. Expected
+statuses are `complete`, `skipped_existing_analysis`, `skipped_no_roi`,
+`skipped_limit`, or `error`. An error stops with a nonzero exit code after all
+recordings have been reported. Fix the named recording before rerunning.
+
+For each completed recording, inspect `analysis/roi_dff_qc.png` before using
+the CSV files. The folder contains raw ROI intensities, adaptive F0,
+unsmoothed/smoothed ΔF/F, detected peaks, and the QC plot.
+
+### Analyze one recording manually
 
 Use the recording's true frame rate. The current Gaillard pilot uses 4 fps:
 

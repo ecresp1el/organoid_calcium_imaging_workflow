@@ -15,6 +15,7 @@ from .group_comparison import compare_imported_fusion, compare_imported_mgeo
 from .grant_figure import create_mgeo_vs_assembloid_grant_figure
 from .scratch_label_import import import_labels_from_scratch
 from .peak_detector_qc import generate_mgeo_peak_detector_qc, generate_mgeo_prominence_sweep_qc
+from .post_roi_analysis import analyze_roi_ready
 
 
 def main() -> None:
@@ -78,6 +79,11 @@ def main() -> None:
     analyze.add_argument("--manifest", type=Path, required=True)
     analyze.add_argument("--roi", type=Path, required=True)
     analyze.add_argument("--fps", type=float, required=True)
+    analyze_ready = commands.add_parser("analyze-roi-ready", help="Run resumable Stage 3 adaptive-F0 analysis for every valid saved ROI under a scratch root.")
+    analyze_ready.add_argument("--scratch-root", type=Path, required=True)
+    analyze_ready.add_argument("--dry-run", action="store_true", help="Validate and print the Stage 3 plan without writing analysis files.")
+    analyze_ready.add_argument("--overwrite", action="store_true", help="Explicitly rerun recordings with a complete existing analysis directory.")
+    analyze_ready.add_argument("--limit", type=int, default=None, help="Analyze at most this many newly queued recordings; useful for a safe pilot run.")
     batch = commands.add_parser("preprocess-root", help="Preprocess every .ims file; resumes only verified stage-4 recordings by default.")
     batch.add_argument("--input-root", type=Path, required=True)
     batch.add_argument("--output-root", type=Path, required=True)
@@ -181,6 +187,14 @@ def main() -> None:
     if args.command == "analyze":
         print(f"[analysis] fps={args.fps:g}; adaptive percentile F0 over 30 s; smoothing=1 s; peaks=median+3.0 MADsigma with prominence>=1.5 MADsigma")
         print(f"[analysis] complete: {run_analysis(args.manifest, args.roi, args.fps)}")
+    if args.command == "analyze-roi-ready":
+        results = analyze_roi_ready(args.scratch_root, dry_run=args.dry_run, overwrite=args.overwrite, limit=args.limit)
+        for number, result in enumerate(results, start=1):
+            print(f"[stage3-batch] {number}/{len(results)} " + json.dumps(result, sort_keys=True))
+        counts = {status: sum(result["status"] == status for result in results) for status in sorted({str(result["status"]) for result in results})}
+        print("[stage3-batch] summary " + json.dumps(counts, sort_keys=True))
+        if counts.get("error", 0):
+            raise SystemExit(1)
     if args.command == "preprocess-root":
         ims_paths = sorted(path for path in args.input_root.rglob("*.ims") if not path.name.startswith("._"))
         if not ims_paths:

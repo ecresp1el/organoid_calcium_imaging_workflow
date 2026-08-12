@@ -136,7 +136,22 @@ The command must report `ROI validation passed` and a nonzero `roi_count`.
 That completes Stage 2. The source-only input is unchanged; ROI labels are
 always written only under the disposable scratch recording.
 
-## Next: Stage 3 pilot analysis
+## Stage 3: adaptive-F0 analysis after ROI drawing
+
+For a clean project, use the resumable batch launcher after ROIs are saved:
+
+```bash
+./run_commands/analyze_rois.sh --scratch "/path/to/your_scratch" --dry-run
+./run_commands/analyze_rois.sh --scratch "/path/to/your_scratch"
+```
+
+It analyzes only valid ROI-labeled recordings, obtains each frame rate from
+the manifest or source-adjacent metadata text, and skips complete analyses
+unless `--overwrite` is explicit. See Stage 5 in
+[README_WALKTHROUGH.md](README_WALKTHROUGH.md) for expected outputs and a safe
+one-recording `--limit 1` test.
+
+## Single-recording Stage 3 analysis
 
 After Stage 2 validation, run the adaptive-percentile F0 analysis with the
 recording's actual acquisition frame rate. For the current Gaillard pilot, the
