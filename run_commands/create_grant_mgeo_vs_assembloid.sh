@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Creates only a new grant-figure output folder from existing Stage 3 and
-# group-level data. It never reprocesses movies, labels, or calcium traces.
+# Reproducibility contract: docs/GRANT_FIGURE_REPRODUCIBILITY.md
+# Creates only a grant-figure output from existing Stage 3 and group-level
+# data. It never reprocesses movies, labels, or calcium traces.
 if [[ "${CONDA_DEFAULT_ENV:-}" != "organoid-calcium-workflow" ]]; then
   echo "Activate the workflow environment first: conda activate organoid-calcium-workflow" >&2
   exit 1
